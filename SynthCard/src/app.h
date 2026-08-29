@@ -1,0 +1,99 @@
+// SynthCard - application state and top-level wiring.
+#pragma once
+#include <stdint.h>
+#include "audio/engine.h"
+#include "input/keys.h"
+#include "storage/storage.h"
+#include "sequencer/sequencer.h"
+
+namespace synth {
+
+enum Mode : uint8_t {
+    M_PLAY = 0, M_DRUM, M_SEQ, M_SOUND, M_FX, M_SONG, M_FILE, M_SYS, M_COUNT
+};
+extern const char* const kModeNames[M_COUNT];
+
+enum BootChoice : uint8_t { BOOT_JAM = 0, BOOT_NEW, BOOT_LOAD, BOOT_COUNT };
+enum ChordMode : uint8_t { CH_OFF = 0, CH_POWER, CH_TRIAD, CH_SEVENTH, CH_COUNT };
+extern const char* const kChordNames[CH_COUNT];
+
+struct App {
+    Project     proj;
+    AudioEngine engine;
+    Keys        keys;
+    Settings    settings;
+    Rng         rng;
+
+    bool    booted   = false;
+    uint8_t bootSel  = BOOT_JAM;
+    Mode    mode     = M_PLAY;
+
+    // per-screen cursors
+    uint8_t soundPage = 0, soundCursor = 0;
+    uint8_t fxCursor = 0;
+    uint8_t drumLane = 0, drumPage = 0, drumParam = 0;
+    uint8_t seqTrack = 0, seqStep = 0, seqPage = 0, seqField = 0;
+    uint8_t songCursor = 0, songField = 0;
+    uint8_t fileCursor = 0, fileAction = 0;
+    uint8_t sysCursor = 0;
+
+    uint16_t presetIndex[kMelTracks] = {0, 5};
+    uint8_t  kitIndex = 0;
+    uint8_t  chordMode = CH_OFF;
+    uint8_t  euclidHits = 4, euclidRot = 0;
+
+    // live keyboard bookkeeping: which notes each physical key started
+    uint8_t keyNotes[kKeyCount][4] = {{0}};
+
+    // overlays
+    char     ovName[14] = {0}, ovValue[14] = {0};
+    float    ovFrac = 0.0f;
+    uint32_t ovUntil = 0;
+    char     toast[48] = {0};
+    uint32_t toastUntil = 0;
+    bool     toastError = false;
+    bool     menuOpen = false, helpOpen = false;
+    uint8_t  menuCursor = 0;
+    uint8_t  helpPage = 0;
+
+    // file browser
+    char fileNames[kMaxProjectFiles][kNameLen] = {{0}};
+    int  fileCount = 0;
+    bool fileListValid = false;
+
+    Pattern clipboard;
+    bool    clipboardValid = false;
+
+    uint32_t tapTimes[4] = {0};
+    uint8_t  tapCount = 0;
+
+    uint32_t lastDrawMs = 0;
+    float    fps = 0.0f;
+};
+
+void appSetup();
+void appLoop();
+
+// --- shared helpers used by the screens ------------------------------------
+void showParam(App& a, const char* name, const char* value, float frac);
+void showToast(App& a, const char* msg, bool error = false);
+void applyPreset(App& a, uint8_t track, int index);
+void applyKit(App& a, int index);
+uint8_t liveBaseNote(const App& a);
+void refreshFileList(App& a);
+
+// --- UI entry points --------------------------------------------------------
+void uiBegin();
+void uiDrawBoot(App& a);
+void uiDraw(App& a);
+
+// Per-screen draw + input, implemented in screens.cpp.
+int  uiMenuCount();
+const char* uiMenuLabel(int i);
+int  uiHelpPageCount();
+
+void screenDraw(App& a, int x, int y, int w, int h);
+bool screenAction(App& a, const Action& act);   // true when handled
+const char* screenHint(const App& a);
+
+}  // namespace synth

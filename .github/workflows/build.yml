@@ -1,0 +1,37 @@
+name: build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host unit tests
+        run: make -C test test
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install board support and libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://static-cdn.m5stack.com/resource/arduino/package_m5stack_index.json
+          arduino-cli core update-index
+          arduino-cli core install m5stack:esp32
+          arduino-cli lib install M5Unified M5Cardputer
+      - name: Build firmware
+        run: tools/package.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SynthCard-firmware
+          path: dist/*.bin
