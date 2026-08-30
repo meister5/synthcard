@@ -22,7 +22,11 @@ enum StepFlag : uint8_t { SF_MUTE = 0x01, SF_SLIDE = 0x02, SF_ACCENT = 0x04 };
 struct Step {
     uint8_t note;    // 0 = rest, otherwise MIDI note number
     uint8_t vel;     // 1..127
-    uint8_t gate;    // 0..15, fraction of the step; 15 = tie into the next step
+    // 0..15  = (gate+1)/16 of one step, so 15 is exactly one step long.
+    // 16..31 = whole steps, (gate-14) of them, i.e. 16 = 2 steps ... 31 = 17.
+    // Live recording writes real held lengths into this, so a note you hold
+    // plays back as long as you held it.
+    uint8_t gate;
     uint8_t flags;   // SF_* in the low nibble, probability 0..8 in the high nibble
     inline bool  on()   const { return note != 0 && !(flags & SF_MUTE); }
     inline uint8_t prob() const { return (uint8_t)(flags >> 4); }     // 0 = always
@@ -97,11 +101,19 @@ public:
     void advance(int samples);          // fires step/gate events when due
 
     // --- recording ---------------------------------------------------------
-    void setRecording(bool on) { recording_ = on; }
+    void setRecording(bool on);
     inline bool recording() const { return recording_; }
     void recordNote(uint8_t track, uint8_t note, uint8_t vel);
+    // Closes the note opened by recordNote and writes the held length as the
+    // step's gate. Safe to call for a note that was never recorded.
+    void recordNoteOff(uint8_t track, uint8_t note);
     void recordDrum(uint8_t lane, uint8_t vel);
     int  nearestStep() const;
+    // Clears whatever sits under the playhead: track < kMelTracks is melodic,
+    // otherwise drum lane (track - kMelTracks). Used by hold-to-erase.
+    void eraseStep(uint8_t track);
+    // Converts a held length in samples into a Step::gate value.
+    uint8_t gateForHeld(uint32_t heldSamples) const;
 
     void allNotesOff();
     void refreshTiming();               // after a BPM / swing change
@@ -120,8 +132,20 @@ private:
     int      gateCountdown_[kMelTracks] = {0, 0};
     uint8_t  soundingNote_[kMelTracks] = {0, 0};
     int      curStepSamples_ = 1;
+    uint32_t sampleClock_ = 0;
+    // One open recording per melodic track: sequencer tracks are monophonic,
+    // so the most recent note is the one whose length we are measuring.
+    uint8_t  recNote_[kMelTracks] = {0, 0};
+    uint8_t  recStep_[kMelTracks] = {0, 0};
+    uint32_t recStart_[kMelTracks] = {0, 0};
     Rng      rng_;
 };
+
+// Step length expressed in sixteenths of a step, so 16 is exactly one step
+// and 32 is two. Keeps the gate encoding in one place.
+inline int gateSixteenths(uint8_t gate) { return gate < 16 ? (gate + 1) : (gate - 14) * 16; }
+constexpr uint8_t kGateMax = 31;
+void formatGate(uint8_t gate, char* buf, int len);
 
 // Pattern length of the pattern that is currently playing, in steps.
 inline int patternLength(const Project& p, uint8_t idx) {

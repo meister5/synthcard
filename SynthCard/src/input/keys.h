@@ -22,6 +22,7 @@ enum Act : uint8_t {
     A_UP, A_DOWN, A_LEFT, A_RIGHT,
     A_STEP,                       // arg = 0..15
     A_PATTERN_SEL,                // arg = 0..7
+    A_PATTERN_STEP,               // arg = -1 / +1
     A_SONG_MODE, A_HELP,
     A_RND_DRUMS, A_RND_BASS, A_RND_MELODY, A_RND_SOUND, A_EUCLID,
     A_COPY, A_PASTE, A_CLEAR_PATTERN, A_SAVE, A_LOAD,

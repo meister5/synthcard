@@ -43,15 +43,21 @@ void AudioEngine::drainEvents() {
 
 void AudioEngine::handle(const Event& e) {
     switch (e.type) {
-        case EV_NOTE_ON:
-            if (arp_.enabled() && e.a == liveTrack_) arp_.noteOn(e.b, e.c);
-            else startNote(e.a, e.b, e.c, false);
-            if (seq_.recording() && seq_.playing()) seq_.recordNote(e.a, e.b, e.c);
+        case EV_NOTE_ON: {
+            const uint8_t tr = (uint8_t)(e.a & 0x7F);
+            if (arp_.enabled() && tr == liveTrack_) arp_.noteOn(e.b, e.c);
+            else startNote(tr, e.b, e.c, false);
+            if (!(e.a & kNoRecord) && seq_.recording() && seq_.playing())
+                seq_.recordNote(tr, e.b, e.c);
             break;
-        case EV_NOTE_OFF:
-            if (arp_.enabled() && e.a == liveTrack_) arp_.noteOff(e.b);
-            else stopNote(e.a, e.b);
+        }
+        case EV_NOTE_OFF: {
+            const uint8_t tr = (uint8_t)(e.a & 0x7F);
+            if (arp_.enabled() && tr == liveTrack_) arp_.noteOff(e.b);
+            else stopNote(tr, e.b);
+            if (!(e.a & kNoRecord) && seq_.recording()) seq_.recordNoteOff(tr, e.b);
             break;
+        }
         case EV_DRUM:
             drums_.trigger(e.a, e.b);
             if (seq_.recording() && seq_.playing()) seq_.recordDrum(e.a, e.b);
@@ -65,6 +71,7 @@ void AudioEngine::handle(const Event& e) {
         case EV_PATTERN: seq_.selectPattern(e.a, e.b != 0); break;
         case EV_SONGMODE:seq_.setSongMode(e.a != 0); break;
         case EV_ARP_ON:  arp_.setEnabled(e.a != 0); if (!e.a) killAll(); break;
+        case EV_ERASE_STEP: seq_.eraseStep(e.a); break;
         default: break;
     }
 }

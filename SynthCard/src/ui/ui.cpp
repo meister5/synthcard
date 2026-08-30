@@ -78,8 +78,9 @@ static bool canvasReady() {
 // ------------------------------------------------------------------ chrome --
 static void drawTopBar(App& a) {
     M5Canvas& g = uiCanvas();
-    g.fillRect(0, 0, W, TOP_H, C_PANEL);
-    g.drawFastHLine(0, TOP_H, W, C_GRID);
+    const bool recOn = a.engine.seq().recording();
+    g.fillRect(0, 0, W, TOP_H, recOn ? rgb(70, 20, 26) : C_PANEL);
+    g.drawFastHLine(0, TOP_H, W, recOn ? C_REC : C_GRID);
 
     // mode name
     textAt(g, 3, 3, kModeNames[a.mode], C_ACCENT, &fonts::Font0);
@@ -87,19 +88,24 @@ static void drawTopBar(App& a) {
     // transport
     Sequencer& s = a.engine.seq();
     const bool playing = s.playing();
-    const bool rec = s.recording();
+    const bool rec = recOn;
     int x = 42;
     if (playing) g.fillTriangle(x, 3, x, 10, x + 6, 6, rec ? C_REC : C_OK);
     else         g.fillRect(x, 3, 7, 7, C_DIM);
-    if (rec) g.fillCircle(x + 14, 6, 3, C_REC);
+    // Blink the record light so an armed transport reads at a glance.
+    if (rec && ((millis() >> 8) & 1)) g.fillCircle(x + 14, 6, 3, C_REC);
+    else if (rec) g.drawCircle(x + 14, 6, 3, C_REC);
 
     char buf[40];
     snprintf(buf, sizeof(buf), "%3d BPM", a.proj.bpm);
     textAt(g, 66, 3, buf, C_TEXT, &fonts::Font0);
 
-    snprintf(buf, sizeof(buf), "%s%d.%02d",
-             s.songMode() ? "S" : "P", s.currentPattern() + 1, (s.step() % 16) + 1);
-    textAt(g, 118, 3, buf, s.songMode() ? C_ACC2 : C_DIM, &fonts::Font0);
+    if (s.queuedPattern() != 0xFF)
+        snprintf(buf, sizeof(buf), "PTN %d>%d", s.currentPattern() + 1, s.queuedPattern() + 1);
+    else
+        snprintf(buf, sizeof(buf), "%s %d", s.songMode() ? "SONG" : "PTN", s.currentPattern() + 1);
+    textAt(g, 114, 3, buf, s.songMode() ? C_ACC2
+                          : (s.queuedPattern() != 0xFF ? C_ACC2 : C_DIM), &fonts::Font0);
 
     // step blinker: 16 ticks across the right edge
     int len = patternLength(a.proj, s.currentPattern());
@@ -186,49 +192,124 @@ static void drawMenu(App& a) {
     textAt(g, x + w / 2, y + h - 11, "FN+;/. MOVE  ENTER OK", C_FAINT, &fonts::Font0, textdatum_t::top_center);
 }
 
-static const char* const kHelpPages[][9] = {
-    {"TRANSPORT & MODES",
-     "SPACE    play / stop",
-     "\\        record arm",
-     "TAB      next mode",
-     "FN+1..8  jump to mode",
-     "`        menu",
-     "FN+SPACE tap tempo",
-     "9 / 0    BPM  (FN = x10)",
-     "- / =    octave down/up"},
-    {"EDIT & PERFORM",
-     "Z..? S..;  play notes",
-     "1..8 Q..I  steps 1..16",
-     "O / P      select param",
-     "[ / ]      value -/+",
-     "FN+;./,/   arrows",
-     "SHIFT+1..8 pick pattern",
-     "A          arp on/off",
-     "F / K      preset -/+"},
-    {"GENERATE & FILES",
-     "FN+Q  random drums",
-     "FN+W  random bass",
-     "FN+E  random melody",
-     "FN+R  random sound",
-     "FN+T  euclid on lane",
-     "FN+Y/U copy / paste pat",
-     "FN+I  clear pattern",
-     "FN+O / FN+P  save / load"},
+// Per-tab manual. The hint bar can only carry three shortcuts, so ` opens the
+// full page for whichever tab you are on; FN+, / FN+/ flips to the global keys.
+struct HelpPage { const char* title; const char* line[9]; };
+
+static const HelpPage kModeHelp[M_COUNT] = {
+    {"PLAY", {
+        "Z..? and S..;   play notes",
+        "- / =           octave down / up",
+        "[ / ]           filter cutoff",
+        "O / P           resonance",
+        "F / K           previous / next sound",
+        "1..8            drum pads",
+        "FN+; / FN+.     LEAD <-> BASS track",
+        "A               arpeggiator on / off",
+        "hold BKSP       erase while playing"}},
+    {"DRUM", {
+        "1..8  Q..I      toggle steps 1-16",
+        "Z X C V B N M , .   the 9 drum pads",
+        "FN+; / FN+.     choose lane",
+        "FN+, / FN+/     page (patterns > 16)",
+        "O / P           lane parameter",
+        "[ / ]           change it (auditions)",
+        "F / K           previous / next kit",
+        "FN+T            euclidean fill",
+        "'  mute lane    FN+BKSP clear lane"}},
+    {"SEQ", {
+        "1..8  Q..I      pick step 1-16",
+        "Z..? keys       set note, cursor moves on",
+        "O / P           field, [ / ] changes it",
+        "GATE past 16/16 = 2STP..17STP long notes",
+        "FN+, / FN+/     page (steps 17+)",
+        "FN+; / FN+.     LEAD <-> BASS track",
+        "SHIFT+1..8      go to pattern 1-8",
+        "SHIFT+[ / ]     previous / next pattern",
+        "ENTER mute step   BKSP clear step"}},
+    {"SOUND", {
+        "O / P           pick a parameter",
+        "[ / ]           change it (FN = x10)",
+        "FN+, / FN+/     turn the page",
+        "1..7            jump straight to a page",
+        "FN+; / FN+.     LEAD <-> BASS track",
+        "F / K           previous / next preset",
+        "FN+R            randomise, musically",
+        "DELAY and REVERB on the VOICE page",
+        "are this track's sends into the FX"}},
+    {"FX", {
+        "O / P           pick a parameter",
+        "[ / ]           change it (FN = x10)",
+        "FN+; / FN+.     move up / down",
+        "FN+, / FN+/     jump column",
+        "",
+        "MIX is how much you hear.",
+        "Each track feeds the delay and reverb",
+        "through its own send, set on the",
+        "SOUND page (VOICE) or the kit."}},
+    {"SONG", {
+        "FN+; / FN+.     choose a slot",
+        "O / P           pattern / repeat field",
+        "[ / ]           change the value",
+        "1..8            set this slot's pattern",
+        "ENTER           add a slot",
+        "BKSP            remove the last slot",
+        "FN+\\            song mode on / off",
+        "",
+        "Song mode plays the list top to bottom."}},
+    {"FILE", {
+        "FN+, / FN+/   NAME SAVE LOAD DELETE NEW",
+        "On NAME: type A-Z 0-9 - _",
+        "BKSP deletes, ENTER moves to SAVE",
+        "FN+; / FN+.     scan card / browse list",
+        "ENTER           run the chosen action",
+        "",
+        "Saves to SD:/synthcard/NAME.SCP",
+        "Nothing is written to the card until",
+        "you save."}},
+    {"SYS", {
+        "FN+; / FN+.     choose a row",
+        "[ / ]           change the value",
+        "",
+        "Volume, brightness, swing, scale,",
+        "root note and chord mode.",
+        "",
+        "The right column is live: CPU load,",
+        "voices, free RAM, frame rate and",
+        "battery."}},
 };
-constexpr int kHelpPageCount = sizeof(kHelpPages) / sizeof(kHelpPages[0]);
-int uiHelpPageCount() { return kHelpPageCount; }
+
+static const HelpPage kGlobalHelp = {"GLOBAL KEYS", {
+    "SPACE           play / stop",
+    "\\               record arm",
+    "hold BKSP       erase under playhead",
+    "TAB             next tab, FN+1..8 jumps",
+    "SHIFT+1..8      pattern 1-8",
+    "SHIFT+[ / ]     previous / next pattern",
+    "9 / 0  BPM      - / =  octave",
+    "FN+SPACE        tap tempo",
+    "FN+`            menu      `  this help"}};
+
+int uiHelpPageCount() { return 2; }
 
 static void drawHelp(App& a) {
     M5Canvas& g = uiCanvas();
     g.fillRect(0, 0, W, H, C_BG);
-    const int p = a.helpPage % kHelpPageCount;
-    textAt(g, 4, 3, kHelpPages[p][0], C_ACCENT, &fonts::Font0);
+    const bool global = (a.helpPage % 2) != 0;
+    const HelpPage& hp = global ? kGlobalHelp : kModeHelp[a.mode % M_COUNT];
+
+    g.fillRect(0, 0, W, 13, C_PANEL);
+    textAt(g, 4, 3, hp.title, C_ACCENT, &fonts::Font0);
+    textAt(g, W - 4, 3, global ? "2/2" : "1/2", C_FAINT, &fonts::Font0, textdatum_t::top_right);
     g.drawFastHLine(0, 13, W, C_GRID);
-    for (int i = 1; i < 9; ++i)
-        textAt(g, 6, 17 + (i - 1) * 13, kHelpPages[p][i], C_TEXT, &fonts::Font0);
-    char f[32];
-    snprintf(f, sizeof(f), "PAGE %d/%d   FN+,/ TURN   ESC=`", p + 1, kHelpPageCount);
-    textAt(g, W / 2, H - 11, f, C_FAINT, &fonts::Font0, textdatum_t::top_center);
+
+    for (int i = 0; i < 9; ++i)
+        if (hp.line[i] && hp.line[i][0])
+            textAt(g, 6, 17 + i * 11, hp.line[i], C_TEXT, &fonts::Font0);
+
+    g.fillRect(0, H - 12, W, 12, C_PANEL);
+    textAt(g, W / 2, H - 10, "FN+, / FN+/  TURN PAGE     ANY KEY  CLOSE",
+           C_FAINT, &fonts::Font0, textdatum_t::top_center);
 }
 
 // -------------------------------------------------------------------- boot --

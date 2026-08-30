@@ -23,6 +23,7 @@ constexpr int kScopeSize  = 120;
 enum EvType : uint8_t {
     EV_NONE = 0, EV_NOTE_ON, EV_NOTE_OFF, EV_DRUM, EV_ALL_OFF, EV_PANIC,
     EV_PLAY, EV_STOP, EV_TOGGLE, EV_REC, EV_PATTERN, EV_SONGMODE, EV_ARP_ON,
+    EV_ERASE_STEP,
 };
 struct Event { uint8_t type, a, b, c; };
 
@@ -34,8 +35,12 @@ public:
 
     // ---- called from the UI thread (thread-safe, non-blocking) ------------
     void post(uint8_t type, uint8_t a = 0, uint8_t b = 0, uint8_t c = 0);
+    // Bit 7 of `track` marks a note that should sound but not be recorded -
+    // the upper voices of a chord, so a recorded chord keeps its root.
+    static constexpr uint8_t kNoRecord = 0x80;
     void noteOn(uint8_t track, uint8_t note, uint8_t vel) { post(EV_NOTE_ON, track, note, vel); }
     void noteOff(uint8_t track, uint8_t note)             { post(EV_NOTE_OFF, track, note); }
+    void eraseStep(uint8_t track)                         { post(EV_ERASE_STEP, track); }
     void drumHit(uint8_t lane, uint8_t vel)               { post(EV_DRUM, lane, vel); }
     void panic()                                          { post(EV_PANIC); }
     void setLiveTrack(uint8_t t) { liveTrack_ = t < kMelTracks ? t : 0; }

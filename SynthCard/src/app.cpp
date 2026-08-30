@@ -115,12 +115,16 @@ static void noteKeyDown(App& app, uint8_t id, int8_t semi, const Mods& m) {
     const uint8_t tr = app.engine.liveTrack();
     for (int i = 0; i < cn && i < 4; ++i) {
         app.keyNotes[id][i] = chord[i];
-        app.engine.noteOn(tr, chord[i], vel);
+        // Only the root is recorded; a sequencer track is monophonic, so
+        // recording every chord tone would just leave the top note behind.
+        app.engine.noteOn(i == 0 ? tr : (uint8_t)(tr | AudioEngine::kNoRecord), chord[i], vel);
     }
     for (int i = cn; i < 4; ++i) app.keyNotes[id][i] = 0;
 
     // Step entry: in SEQ mode a played key writes into the selected step.
-    if (app.mode == M_SEQ) {
+    // Skipped while the transport is recording, or the same keypress would be
+    // entered twice - once at the cursor and once under the playhead.
+    if (app.mode == M_SEQ && !(app.engine.seq().recording() && app.engine.seq().playing())) {
         Pattern& p = app.proj.pat[app.engine.seq().currentPattern()];
         const int len = patternLength(app.proj, app.engine.seq().currentPattern());
         const int pages = (len + 15) / 16;
@@ -138,7 +142,7 @@ static void noteKeyUp(App& app, uint8_t id) {
     const uint8_t tr = app.engine.liveTrack();
     for (int i = 0; i < 4; ++i) {
         if (!app.keyNotes[id][i]) continue;
-        app.engine.noteOff(tr, app.keyNotes[id][i]);
+        app.engine.noteOff(i == 0 ? tr : (uint8_t)(tr | AudioEngine::kNoRecord), app.keyNotes[id][i]);
         app.keyNotes[id][i] = 0;
     }
 }
@@ -228,6 +232,16 @@ static bool handleGlobal(App& app, const Action& act) {
         case A_PATTERN_SEL: {
             app.engine.post(EV_PATTERN, (uint8_t)act.arg, s.playing() ? 0 : 1);
             char m[32]; snprintf(m, sizeof(m), s.playing() ? "PATTERN %d QUEUED" : "PATTERN %d", act.arg + 1);
+            showToast(app, m);
+            return true;
+        }
+        case A_PATTERN_STEP: {
+            // Step relative to whatever is already queued, so two taps move two.
+            int base = (s.queuedPattern() != 0xFF) ? s.queuedPattern() : s.currentPattern();
+            int n = (base + kPatternCount + act.arg) % kPatternCount;
+            app.engine.post(EV_PATTERN, (uint8_t)n, s.playing() ? 0 : 1);
+            char m[32];
+            snprintf(m, sizeof(m), s.playing() ? "PATTERN %d NEXT BAR" : "PATTERN %d", n + 1);
             showToast(app, m);
             return true;
         }
@@ -341,12 +355,30 @@ static void menuActivate(App& app) {
 // ===========================================================================
 // per-frame input
 // ===========================================================================
+// The key map stores TAB/ENTER/BACKSPACE as HID codes that happen to land in
+// the printable ASCII range ('+', '(', '*'), so they have to be excluded by
+// position rather than by value.
 static char charForKey(uint8_t id, bool shift) {
     uint8_t r = id / 14, c = id % 14;
     if (r > 3 || c > 13) return 0;
+    if ((r == 1 && c == 0) || (r == 2 && c == 13) || (r == 0 && c == 13)) return 0;  // TAB ENTER BKSP
+    if (r == 2 && c <= 1) return 0;                                                  // FN SHIFT
+    if (r == 3 && c <= 2) return 0;                                                  // CTRL OPT ALT
+    if (r == 3 && c == 13) return 0;                                                 // SPACE stays transport
     KeyValue_t kv = _key_value_map[r][c];
     char ch = shift ? kv.value_second : kv.value_first;
     return (ch >= 32 && ch < 127) ? ch : 0;
+}
+
+// Project names are uppercase A-Z, 0-9, '-' and '_' so that what the field
+// shows is exactly the filename that lands on the card.
+static char nameCharFor(uint8_t id, bool shift) {
+    char ch = charForKey(id, shift);
+    if (ch >= 'a' && ch <= 'z') return (char)(ch - 32);
+    if (ch >= 'A' && ch <= 'Z') return ch;
+    if (ch >= '0' && ch <= '9') return ch;
+    if (ch == '-' || ch == '_') return ch;
+    return 0;
 }
 
 static void handleBootKey(App& app, const KeyEvent& e) {
@@ -387,11 +419,11 @@ static void handleKey(App& app, const KeyEvent& e) {
         return;
     }
 
-    // FILE screen turns the letter keys into a text field for the project name.
+    // FILE screen turns the whole letter keyboard into a text field for the
+    // project name. TAB, ENTER, BKSP, SPACE and the FN layer stay commands.
     if (app.mode == M_FILE && app.fileAction == 0 && e.pressed && !m.fn) {
-        char ch = charForKey(e.id, m.shift);
-        int8_t semi = keyToSemitone(e.id);
-        if (ch && (semi >= 0 || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
+        char ch = nameCharFor(e.id, m.shift);
+        if (ch) {
             int n = (int)strlen(app.proj.name);
             if (n < kNameLen - 1) { app.proj.name[n] = ch; app.proj.name[n + 1] = 0; }
             return;
@@ -466,6 +498,18 @@ void appLoop() {
     if (a.keys.watchdogFired()) {
         a.engine.post(EV_ALL_OFF);
         for (int i = 0; i < kKeyCount; ++i) for (int j = 0; j < 4; ++j) a.keyNotes[i][j] = 0;
+    }
+
+    // Hold BACKSPACE while the transport runs to rub out whatever is under the
+    // playhead - the standard groovebox erase, and the answer to "how do I
+    // remove what I just recorded".
+    if (a.booted && !a.menuOpen && !a.helpOpen && !a.keys.mods().fn &&
+        a.keys.held(KID(0, 13)) && a.engine.seq().playing() &&
+        !(a.mode == M_FILE || a.mode == M_SYS)) {
+        uint8_t track = a.engine.liveTrack();
+        if (a.mode == M_DRUM)     track = (uint8_t)(kMelTracks + a.drumLane);
+        else if (a.mode == M_SEQ) track = (uint8_t)(a.seqTrack % kMelTracks);
+        a.engine.eraseStep(track);
     }
 
     for (int i = 0; i < a.keys.eventCount(); ++i) {

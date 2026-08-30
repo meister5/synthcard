@@ -146,7 +146,7 @@ bool projectDeserialize(Project& p, const uint8_t* buf, int len) {
                 Step& st = p.pat[i].mel[t][s2];
                 if (st.note > 127) st.note = 0;
                 if (st.vel > 127) st.vel = 100;
-                if (st.gate > 15) st.gate = 8;
+                if (st.gate > kGateMax) st.gate = 8;
             }
     for (int i = 0; i < kPatternCount; ++i)
         for (int j = 0; j < kSongSlots; ++j)

@@ -85,9 +85,9 @@ Action mapAction(uint8_t id, const Mods& m) {
 
     if (r == 3 && c == 13) { a.act = m.fn ? A_TAP_TEMPO : A_PLAY_STOP; return a; }
     if (r == 1 && c == 0)  { a.act = m.fn ? A_MODE_PREV : A_MODE_NEXT; return a; }
-    if (r == 0 && c == 0)  { a.act = A_MENU; return a; }
+    if (r == 0 && c == 0)  { a.act = m.fn ? A_MENU : A_HELP; return a; }
     if (r == 0 && c == 13) { a.act = m.fn ? A_CLEAR_TRACK : A_BACK; return a; }
-    if (r == 2 && c == 13) { a.act = m.fn ? A_HELP : A_CONFIRM; return a; }
+    if (r == 2 && c == 13) { a.act = m.fn ? A_MENU : A_CONFIRM; return a; }
     if (r == 1 && c == 13) { a.act = m.fn ? A_SONG_MODE : A_RECORD; return a; }
 
     // Row 0 digits: steps 1-8, then BPM / octave.
@@ -113,8 +113,14 @@ Action mapAction(uint8_t id, const Mods& m) {
     }
     if (r == 1 && c == 9)  { a.act = m.fn ? A_SAVE : A_CURSOR_PREV; return a; }
     if (r == 1 && c == 10) { a.act = m.fn ? A_LOAD : A_CURSOR_NEXT; return a; }
-    if (r == 1 && c == 11) { a.act = A_VALUE_DOWN; a.arg = m.fn ? 10 : 1; return a; }
-    if (r == 1 && c == 12) { a.act = A_VALUE_UP;   a.arg = m.fn ? 10 : 1; return a; }
+    if (r == 1 && c == 11) {
+        if (m.shift) { a.act = A_PATTERN_STEP; a.arg = -1; return a; }
+        a.act = A_VALUE_DOWN; a.arg = m.fn ? 10 : 1; return a;
+    }
+    if (r == 1 && c == 12) {
+        if (m.shift) { a.act = A_PATTERN_STEP; a.arg = 1; return a; }
+        a.act = A_VALUE_UP;   a.arg = m.fn ? 10 : 1; return a;
+    }
 
     // Row 2 command keys.
     if (r == 2 && c == 2)  { a.act = m.fn ? A_ARP_MODE : A_ARP_TOGGLE; return a; }

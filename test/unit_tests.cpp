@@ -248,13 +248,27 @@ static void testEffects() {
 // ---------------------------------------------------------------------------
 namespace {
 struct CountingSink : SeqSink {
-    std::vector<int> onSteps;
+    std::vector<int> onSteps, offSteps;
     int noteOns = 0, noteOffs = 0, drums = 0;
     long sample = 0;
     void seqNoteOn(uint8_t, uint8_t, uint8_t, bool) override { ++noteOns; onSteps.push_back((int)sample); }
-    void seqNoteOff(uint8_t, uint8_t) override { ++noteOffs; }
+    void seqNoteOff(uint8_t, uint8_t) override { ++noteOffs; offSteps.push_back((int)sample); }
     void seqDrum(uint8_t, uint8_t) override { ++drums; }
 };
+
+// Runs the clock for `samples`, splitting at every event boundary the way the
+// audio engine does.
+static void runSeq(Sequencer& seq, CountingSink& sink, long samples) {
+    long target = sink.sample + samples;
+    while (sink.sample < target) {
+        int seg = seq.samplesUntilNext();
+        if (seg > 64) seg = 64;
+        if (seg > (int)(target - sink.sample)) seg = (int)(target - sink.sample);
+        if (seg < 1) seg = 1;
+        seq.advance(seg);
+        sink.sample += seg;
+    }
+}
 }  // namespace
 
 static void testSequencerTiming() {
@@ -374,6 +388,114 @@ static void testRecording() {
 }
 
 // ---------------------------------------------------------------------------
+// A note held across several steps must come back out that long, and holding
+// a key while recording must capture the length rather than a fixed stub.
+static void testGateLengths() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 120;                        // one 16th = 4000 samples at 32 kHz
+    proj.pat[0].length = 8;
+    for (int i = 0; i < 8; ++i) proj.pat[0].mel[0][i].note = 0;
+    proj.pat[0].mel[0][0].note = 60;
+    proj.pat[0].mel[0][0].vel  = 100;
+    proj.pat[0].mel[0][0].gate = 16;       // 2 whole steps
+
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+    seq.play();
+    runSeq(seq, sink, 4000 * 6);
+    CHECK(sink.noteOns == 1, "expected one note, got %d", sink.noteOns);
+    CHECK(sink.offSteps.size() == 1, "expected one note off, got %d", (int)sink.offSteps.size());
+    if (sink.onSteps.size() && sink.offSteps.size()) {
+        int held = sink.offSteps[0] - sink.onSteps[0];
+        CHECK(abs(held - 8000) <= 128, "gate 16 held %d samples, expected 8000", held);
+    }
+    // A fractional gate must still be a fraction of one step.
+    proj.pat[0].mel[0][0].gate = 7;        // 8/16 of a step
+    CountingSink s2;
+    Sequencer q;
+    q.init(&proj, &s2);
+    q.play();
+    runSeq(q, s2, 4000 * 4);
+    if (s2.onSteps.size() && s2.offSteps.size()) {
+        int held = s2.offSteps[0] - s2.onSteps[0];
+        CHECK(abs(held - 2000) <= 128, "gate 7 held %d samples, expected 2000", held);
+    }
+    // Encoding round trip.
+    CHECK(gateSixteenths(0) == 1, "gate 0 = %d/16", gateSixteenths(0));
+    CHECK(gateSixteenths(15) == 16, "gate 15 = %d/16", gateSixteenths(15));
+    CHECK(gateSixteenths(16) == 32, "gate 16 = %d/16", gateSixteenths(16));
+    CHECK(gateSixteenths(kGateMax) == 17 * 16, "gate max = %d/16", gateSixteenths(kGateMax));
+}
+
+static void testRecordedLength() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 120;
+    proj.pat[0].length = 16;
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+    seq.setRecording(true);
+    seq.play();
+
+    struct Case { long heldSamples; uint8_t wantGate; const char* what; };
+    const Case cases[] = {
+        {1000,  3,  "quarter step"},
+        {2000,  7,  "half step"},
+        {4000, 15,  "one step"},
+        {8000, 16,  "two steps"},
+        {16000, 18, "four steps"},
+    };
+    for (const Case& c : cases) {
+        proj.pat[0].clearTrack(0);
+        runSeq(seq, sink, 4000);                  // land on a step boundary
+        seq.recordNote(0, 64, 110);
+        runSeq(seq, sink, c.heldSamples);
+        seq.recordNoteOff(0, 64);
+        int found = -1;
+        for (int i = 0; i < 16; ++i) if (proj.pat[0].mel[0][i].note == 64) found = i;
+        CHECK(found >= 0, "%s: nothing recorded", c.what);
+        if (found < 0) continue;
+        uint8_t g = proj.pat[0].mel[0][found].gate;
+        CHECK(g == c.wantGate, "%s: recorded gate %d, expected %d", c.what, g, c.wantGate);
+    }
+
+    // A release for a note that was never recorded must be harmless.
+    seq.recordNoteOff(0, 99);
+    seq.recordNoteOff(1, 64);
+}
+
+static void testEraseStep() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 120;
+    proj.pat[0].length = 4;
+    for (int i = 0; i < 4; ++i) {
+        proj.pat[0].mel[0][i].note = 60;
+        proj.pat[0].drum[DL_KICK][i] = 100;
+    }
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+    seq.play();
+    runSeq(seq, sink, 4000 + 100);              // sitting on step 1
+    int s = seq.nearestStep();
+    seq.eraseStep(0);
+    CHECK(proj.pat[0].mel[0][s].note == 0, "melodic erase left note %d on step %d",
+          proj.pat[0].mel[0][s].note, s);
+    seq.eraseStep((uint8_t)(kMelTracks + DL_KICK));
+    CHECK(proj.pat[0].drum[DL_KICK][s] == 0, "drum erase left step %d", s);
+    // Other steps must be untouched.
+    int other = (s + 2) % 4;
+    CHECK(proj.pat[0].mel[0][other].note == 60, "erase hit the wrong step");
+    // Erasing while stopped must do nothing (no playhead to erase under).
+    seq.stop();
+    seq.eraseStep(0);
+    CHECK(proj.pat[0].mel[0][other].note == 60, "erase while stopped removed a note");
+}
+
 static void testScales() {
     CHECK(kScaleCount >= 8, "only %d scales", (int)kScaleCount);
     for (uint8_t sc = 1; sc < kScaleCount; ++sc) {
@@ -611,6 +733,9 @@ int main() {
     testSequencerTiming();
     testSequencerPatternsAndSong();
     testRecording();
+    testGateLengths();
+    testRecordedLength();
+    testEraseStep();
     testScales();
     testEuclid();
     testArp();

@@ -51,6 +51,11 @@ void Project::reset() {
 
 // ---------------------------------------------------------------------------
 
+void formatGate(uint8_t gate, char* buf, int len) {
+    if (gate < 16) snprintf(buf, len, "%d/16", gate + 1);
+    else           snprintf(buf, len, "%dSTP", gate - 14);
+}
+
 void Sequencer::init(Project* proj, SeqSink* sink) {
     proj_ = proj;
     sink_ = sink;
@@ -125,6 +130,7 @@ int Sequencer::samplesUntilNext() const {
 
 void Sequencer::advance(int samples) {
     if (!playing_ || !proj_ || !sink_) return;
+    sampleClock_ += (uint32_t)samples;
     for (int t = 0; t < kMelTracks; ++t) {
         if (gateCountdown_[t] > 0) {
             gateCountdown_[t] -= samples;
@@ -160,8 +166,8 @@ void Sequencer::fireStep() {
         if (st.flags & SF_ACCENT) vel = (uint8_t)clampi(vel + 30, 1, 127);
         sink_->seqNoteOn((uint8_t)t, st.note, vel, (st.flags & SF_SLIDE) != 0);
         soundingNote_[t] = st.note;
-        int g = st.gate >= 15 ? curStepSamples_ * 2      // tie: let the next step cut it
-                              : (curStepSamples_ * (st.gate + 1)) / 16;
+        int g = (st.gate < 16) ? (curStepSamples_ * (st.gate + 1)) / 16
+                               : curStepSamples_ * (st.gate - 14);
         gateCountdown_[t] = g < 32 ? 32 : g;
     }
 
@@ -204,13 +210,55 @@ int Sequencer::nearestStep() const {
     return s;
 }
 
+void Sequencer::setRecording(bool on) {
+    recording_ = on;
+    if (!on) for (int t = 0; t < kMelTracks; ++t) recNote_[t] = 0;
+}
+
+uint8_t Sequencer::gateForHeld(uint32_t heldSamples) const {
+    const int len = curStepSamples_ > 0 ? curStepSamples_ : 1;
+    // Length in sixteenths of a step, rounded to nearest.
+    int sixteenths = (int)(((uint64_t)heldSamples * 16 + len / 2) / (uint32_t)len);
+    if (sixteenths < 1) sixteenths = 1;
+    if (sixteenths <= 16) return (uint8_t)(sixteenths - 1);
+    int steps = (sixteenths + 8) / 16;              // round to whole steps
+    return (uint8_t)clampi(14 + steps, 16, 31);
+}
+
 void Sequencer::recordNote(uint8_t track, uint8_t note, uint8_t vel) {
     if (!proj_ || track >= kMelTracks) return;
-    Step& st = proj_->pat[curPat_].mel[track][nearestStep()];
+    const int s = nearestStep();
+    Step& st = proj_->pat[curPat_].mel[track][s];
     st.note  = note;
     st.vel   = vel ? vel : 100;
     if (st.gate == 0) st.gate = 8;
     st.flags = (uint8_t)(st.flags & 0xF0);
+    recNote_[track]  = note;
+    recStep_[track]  = (uint8_t)s;
+    recStart_[track] = sampleClock_;
+}
+
+void Sequencer::recordNoteOff(uint8_t track, uint8_t note) {
+    if (!proj_ || track >= kMelTracks) return;
+    if (recNote_[track] != note || note == 0) return;
+    recNote_[track] = 0;
+    Step& st = proj_->pat[curPat_].mel[track][recStep_[track] % kMaxSteps];
+    if (st.note != note) return;                    // overwritten in the meantime
+    st.gate = gateForHeld(sampleClock_ - recStart_[track]);
+}
+
+void Sequencer::eraseStep(uint8_t track) {
+    if (!proj_ || !playing_) return;
+    Pattern& p = proj_->pat[curPat_];
+    const int s = nearestStep();
+    if (track < kMelTracks) {
+        p.mel[track][s].note = 0;
+        p.mel[track][s].flags = (uint8_t)(p.mel[track][s].flags & 0xF0);
+        if (recNote_[track]) recNote_[track] = 0;
+    } else {
+        uint8_t lane = (uint8_t)(track - kMelTracks);
+        if (lane < DL_COUNT) p.drum[lane][s] = 0;
+    }
 }
 
 void Sequencer::recordDrum(uint8_t lane, uint8_t vel) {

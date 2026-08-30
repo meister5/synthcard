@@ -241,8 +241,18 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
 
     char buf[48];
     trackBadge(g, 2, y0 + 1, tr, (p.muteMel >> tr) & 1);
-    snprintf(buf, sizeof(buf), "%s  LEN %d  PG %d/%d", p.name, len, page + 1, pages);
+    snprintf(buf, sizeof(buf), "LEN %d  PG %d/%d", len, page + 1, pages);
     textAt(g, 40, y0 + 3, buf, C_DIM, &fonts::Font0);
+    // Pattern bank, so "which pattern am I editing" is never a guess.
+    textAt(g, 116, y0 + 3, "PTN", C_FAINT, &fonts::Font0);
+    for (int i = 0; i < kPatternCount; ++i) {
+        int px = 138 + i * 12;
+        bool cur = i == s.currentPattern();
+        bool q   = i == s.queuedPattern();
+        g.fillRect(px, y0 + 2, 10, 9, cur ? C_ACCENT : (q ? C_ACC2 : C_PANEL));
+        snprintf(buf, sizeof(buf), "%d", i + 1);
+        textAt(g, px + 5, y0 + 3, buf, cur ? C_BG : C_DIM, &fonts::Font0, textdatum_t::top_center);
+    }
 
     // auto-ranged piano roll
     int lo = 127, hi = 0;
@@ -268,7 +278,8 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
         const Step& stp = p.mel[tr][st];
         if (stp.note) {
             int ny = rollY + rollH - 3 - ((stp.note - lo) * (rollH - 6)) / (hi - lo ? hi - lo : 1);
-            int gw = clampi(((cellW - 2) * (stp.gate + 1)) / 16, 2, cellW - 2);
+            // A note longer than one step draws across the steps it covers.
+            int gw = clampi((cellW * gateSixteenths(stp.gate)) / 16 - 1, 2, 16 * cellW - (cx - gx));
             uint16_t c = (stp.flags & SF_MUTE) ? C_FAINT : (stp.vel > 110 ? C_ACCENT : C_ACC2);
             g.fillRect(cx + 1, ny, gw, 3, c);
             if (stp.flags & SF_SLIDE) g.drawFastHLine(cx + 1, ny + 4, cellW - 3, C_ACCENT);
@@ -290,7 +301,7 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
     char v0[8], v1[8], v2[8], v3[8];
     snprintf(v0, sizeof(v0), "%s", nn);
     snprintf(v1, sizeof(v1), "%d", sel.vel);
-    snprintf(v2, sizeof(v2), "%d", sel.gate + 1);
+    formatGate(sel.gate, v2, sizeof(v2));
     snprintf(v3, sizeof(v3), "%s", sel.prob() ? (sel.prob() >= 8 ? "ALW" : "RND") : "ALW");
     vals[0] = v0; vals[1] = v1; vals[2] = v2; vals[3] = v3;
     for (int i = 0; i < kSeqFieldCount; ++i) {
@@ -346,9 +357,11 @@ static bool actSeq(App& a, const Action& act) {
                     showParam(a, "VELOCITY", vl, s.vel / 127.0f);
                     break;
                 case 2:
-                    s.gate = (uint8_t)clampi(s.gate + dir, 0, 15);
-                    snprintf(vl, sizeof(vl), "%d/16", s.gate + 1);
-                    showParam(a, "GATE", vl, (s.gate + 1) / 16.0f);
+                    // 0..15 is a fraction of one step, 16..31 is 2..17 whole
+                    // steps, so a note can be held across the bar.
+                    s.gate = (uint8_t)clampi(s.gate + dir * (big > 1 ? 4 : 1), 0, kGateMax);
+                    formatGate(s.gate, vl, sizeof(vl));
+                    showParam(a, "GATE", vl, s.gate / (float)kGateMax);
                     break;
                 default: {
                     int pr = clampi(s.prob() + dir, 0, 8);
@@ -780,14 +793,14 @@ bool screenAction(App& a, const Action& act) {
 
 const char* screenHint(const App& a) {
     switch (a.mode) {
-        case M_PLAY:  return "Z..? PLAY  []=CUTOFF  OP=RESO  A=ARP  F/K=SOUND";
-        case M_DRUM:  return "1-8 Q-I STEPS  Z..M PADS  FN+;. LANE  []=VALUE";
-        case M_SEQ:   return "1-8 Q-I STEP  Z..? NOTE  OP=FIELD  []=VALUE";
-        case M_SOUND: return "OP=PARAM  []=VALUE  FN+,/ PAGE  F/K=PRESET";
-        case M_FX:    return "OP=PARAM  []=VALUE  FN+;. MOVE";
-        case M_SONG:  return "FN+;. SLOT  []=VALUE  ENTER=ADD  BKSP=DEL";
-        case M_FILE:  return "FN+,/ ACTION  FN+;. LIST  TYPE=RENAME  ENTER=GO";
-        default:      return "FN+;. ROW  []=VALUE  FN+ENTER=HELP";
+        case M_PLAY:  return "Z..? PLAY   F/K SOUND   ` HELP";
+        case M_DRUM:  return "1-8 Q-I STEPS   Z.. PADS   ` HELP";
+        case M_SEQ:   return "Z..? NOTE   OP FIELD   [] VALUE   ` HELP";
+        case M_SOUND: return "OP PARAM   [] VALUE   F/K PRESET   ` HELP";
+        case M_FX:    return "OP PARAM   [] VALUE   ` HELP";
+        case M_SONG:  return "FN+;. SLOT   [] VALUE   ` HELP";
+        case M_FILE:  return "FN+,/ ACTION   TYPE TO RENAME   ` HELP";
+        default:      return "FN+;. ROW   [] VALUE   ` HELP";
     }
 }
 

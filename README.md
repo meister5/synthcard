@@ -76,11 +76,13 @@ esptool --chip esp32s3 write_flash 0x0 dist/SynthCard-merged.bin
 Full reference in [CONTROLS.md](CONTROLS.md), and on the device under
 `FN`+`ENTER`. The short version:
 
-- `SPACE` play/stop, `\` record, `TAB` change mode, `` ` `` menu
+- `` ` `` opens the manual **for the tab you are on** — every key, on the device
+- `SPACE` play/stop, `\` record, hold `BKSP` to erase, `TAB` change mode
 - `Z X C V B N M , . /` + `S D G H J L ;` = a 17-key piano; `-` / `=` octave
 - `1`–`8` and `Q`–`I` = steps 1–16
 - `O` / `P` select a parameter, `[` / `]` change it
 - `FN` + arrows (`; . , /`) navigate; `FN`+`1`…`8` jumps between modes
+- `SHIFT` is the pattern layer: `SHIFT`+`1`…`8` jumps, `SHIFT`+`[`/`]` steps
 - `FN`+`Q`/`W`/`E`/`R` generate a beat, bassline, melody or sound
 
 ## Modes
@@ -121,12 +123,16 @@ nothing to load off the card.
 
 **Sequencer** — Eight patterns, 1–64 steps each, three tracks per pattern
 (LEAD, BASS, and the nine drum lanes). Per-step note, velocity, gate length,
-probability, slide and mute. Global swing, BPM 40–300, tap tempo. Patterns
+probability, slide and mute. Gates run from a sixteenth of a step up to
+seventeen whole steps, so notes can sustain across the bar. Global swing,
+BPM 40–300, tap tempo. Patterns
 chain into a 64-slot song with repeats.
 
 **Recording** — Arm with `\` and play: notes land on the nearest step of the
-running pattern and keep looping. Switch tracks and keep layering. Nothing is
-destructive — every recorded step is editable afterwards on the SEQ page.
+running pattern and keep looping. **How long you hold a key is recorded**, so a
+sustained note plays back sustained. Hold `BKSP` while the loop passes to rub
+notes out again. Switch tracks and keep layering. Nothing is destructive —
+every recorded step is editable afterwards on the SEQ page.
 
 **Performance** — Ten scales (chromatic, major, minor, both pentatonics, blues,
 dorian, mixolydian, harmonic minor, phrygian) that constrain the keyboard to
