@@ -132,7 +132,7 @@ static void drawHintBar(App& a) {
     char right[24];
     if (a.mode == M_DRUM) snprintf(right, sizeof(right), "KIT %s", a.proj.kit.name);
     else snprintf(right, sizeof(right), "OCT %d %s", a.proj.octave,
-                  a.proj.arpOn ? "ARP" : (a.proj.scale ? kScales[a.proj.scale].name : ""));
+                  a.proj.arpOn ? "ARP" : (a.proj.scale ? kScales[a.proj.scale % kScaleCount].name : ""));
     textAt(g, W - 3, y + 4, right, C_FAINT, &fonts::Font0, textdatum_t::top_right);
 }
 
@@ -181,7 +181,7 @@ static void drawMenu(App& a) {
         char line[40];
         switch (idx) {
             case 8:  snprintf(line, sizeof(line), "CHORD  %s", kChordNames[a.chordMode]); break;
-            case 9:  snprintf(line, sizeof(line), "SCALE  %s", kScales[a.proj.scale].name); break;
+            case 9:  snprintf(line, sizeof(line), "SCALE  %s", kScales[a.proj.scale % kScaleCount].name); break;
             case 10: snprintf(line, sizeof(line), "ROOT   %s", kNoteNames[a.proj.root % 12]); break;
             case 11: snprintf(line, sizeof(line), "SWING  %d%%", a.proj.swing); break;
             default: snprintf(line, sizeof(line), "%s", kMenu[idx].label); break;

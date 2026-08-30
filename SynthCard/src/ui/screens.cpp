@@ -193,8 +193,8 @@ static bool actDrum(App& a, const Action& act) {
     const int pages = (len + 15) / 16;
     switch (act.act) {
         case A_STEP: {
-            int st = (a.drumPage % (pages ? pages : 1)) * 16 + act.arg;
-            if (st >= len) return true;
+            const int st = (a.drumPage % (pages ? pages : 1)) * 16 + act.arg;
+            if (st < 0 || st >= len) return true;
             uint8_t& c = p.drum[a.drumLane][st];
             c = c ? 0 : 100;
             if (c) a.engine.drumHit(a.drumLane, c);
@@ -323,17 +323,21 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
     snprintf(buf, sizeof(buf), "STEP %02d", st + 1);
     textAt(g, 4, dy, buf, C_DIM, &fonts::Font0);
 
-    const char* vals[kSeqFieldCount];
-    char v0[8], v1[8], v2[8], v3[8];
+    // One entry per kSeqFieldCount, all of them assigned: this array feeds
+    // drawString directly, so a missing slot is a null-pointer crash.
+    char v0[8], v1[8], v2[8], v3[8], v4[8];
     snprintf(v0, sizeof(v0), "%s", nn);
     snprintf(v1, sizeof(v1), "%d", sel.vel);
     formatGate(sel.gate, v2, sizeof(v2));
-    snprintf(v3, sizeof(v3), "%s", sel.prob() ? (sel.prob() >= 8 ? "ALW" : "RND") : "ALW");
-    vals[0] = v0; vals[1] = v1; vals[2] = v2; vals[3] = v3;
+    snprintf(v3, sizeof(v3), "%s", kChordNames[sel.chord % CHORD_COUNT]);
+    snprintf(v4, sizeof(v4), "%s", sel.prob() ? (sel.prob() >= 8 ? "ALW" : "RND") : "ALW");
+    const char* vals[kSeqFieldCount] = {v0, v1, v2, v3, v4};
+    static_assert(sizeof(vals) / sizeof(vals[0]) == kSeqFieldCount,
+                  "every SEQ field needs a value string");
     for (int i = 0; i < kSeqFieldCount; ++i) {
-        int px = 58 + i * 45;
-        bool s2 = i == a.seqField;
-        if (s2) panel(g, px - 3, dy - 2, 42, 22, C_PANEL2, C_ACCENT);
+        const int px = 46 + i * 39;
+        const bool s2 = i == a.seqField;
+        if (s2) panel(g, px - 3, dy - 2, 37, 22, C_PANEL2, C_ACCENT);
         textAt(g, px, dy, kSeqFields[i], s2 ? C_ACCENT : C_FAINT, &fonts::Font0);
         textAt(g, px, dy + 10, vals[i], C_TEXT, &fonts::Font0);
     }
@@ -850,7 +854,41 @@ static bool actSys(App& a, const Action& act) {
 // ===========================================================================
 // dispatch
 // ===========================================================================
+// Every screen cursor is normalised here, once, before any drawing or editing.
+// Individual screens then index arrays freely; nothing downstream has to trust
+// that a pattern did not shrink, a project did not load, or a cursor was left
+// over from another screen.
+static void clampCursors(App& a) {
+    a.drumLane    %= DL_COUNT;
+    a.drumParam   %= DP_COUNT;
+    a.seqTrack    %= kMelTracks;
+    a.seqField    %= kSeqFieldCount;
+    a.seqStep     %= 16;
+    a.soundPage   %= kSynthPageCount;
+    const uint8_t pn = kSynthPages[a.soundPage].n;
+    a.soundCursor = pn ? (uint8_t)(a.soundCursor % pn) : 0;
+    a.fxCursor    %= FX_COUNT;
+    a.sysCursor   %= SR_COUNT;
+    a.songField   %= 2;
+    a.fileAction  %= 5;
+    a.chordMode   %= CHORD_COUNT;
+    a.menuCursor  %= (uint8_t)uiMenuCount();
+    a.helpPage    %= (uint8_t)uiHelpPageCount();
+    a.bootSel     %= BOOT_COUNT;
+    a.proj.scale  %= kScaleCount;
+    a.proj.root   %= 12;
+    a.proj.arpMode %= ARP_MODE_COUNT;
+    a.proj.arpRate %= 6;
+    if (a.proj.song.length < 1) a.proj.song.length = 1;
+    a.songCursor  %= a.proj.song.length;
+    a.fileCursor  = (a.fileCount > 0) ? (uint8_t)(a.fileCursor % a.fileCount) : 0;
+    const int pages = (patternLength(a.proj, a.engine.seq().currentPattern()) + 15) / 16;
+    a.drumPage    %= (uint8_t)pages;
+    a.seqPage     %= (uint8_t)pages;
+}
+
 void screenDraw(App& a, int x, int y, int w, int h) {
+    clampCursors(a);
     switch (a.mode) {
         case M_PLAY:  drawPlay(a, x, y, w, h); break;
         case M_DRUM:  drawDrum(a, x, y, w, h); break;
@@ -864,15 +902,20 @@ void screenDraw(App& a, int x, int y, int w, int h) {
 }
 
 bool screenAction(App& a, const Action& act) {
+    clampCursors(a);
+    // A step action always names one of the sixteen step keys. Normalising it
+    // here means no screen has to defend its own array indexing.
+    Action e = act;
+    if (e.act == A_STEP) e.arg = (int8_t)clampi(e.arg, 0, 15);
     switch (a.mode) {
-        case M_PLAY:  return actPlay(a, act);
-        case M_DRUM:  return actDrum(a, act);
-        case M_SEQ:   return actSeq(a, act);
-        case M_SOUND: return actSound(a, act);
-        case M_FX:    return actFx(a, act);
-        case M_SONG:  return actSong(a, act);
-        case M_FILE:  return actFile(a, act);
-        default:      return actSys(a, act);
+        case M_PLAY:  return actPlay(a, e);
+        case M_DRUM:  return actDrum(a, e);
+        case M_SEQ:   return actSeq(a, e);
+        case M_SOUND: return actSound(a, e);
+        case M_FX:    return actFx(a, e);
+        case M_SONG:  return actSong(a, e);
+        case M_FILE:  return actFile(a, e);
+        default:      return actSys(a, e);
     }
 }
 

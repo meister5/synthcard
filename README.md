@@ -52,10 +52,14 @@ arduino-cli lib install M5Unified M5Cardputer
 tools/package.sh                 # -> dist/SynthCard.bin and dist/SynthCard-merged.bin
 ```
 
-Host unit tests (DSP, sequencer timing, music theory, file format):
+Host tests. The first suite covers the DSP, sequencer timing, music theory and
+the file format. The second builds the *real* `ui/`, `app` and `engine` sources
+against stand-ins for M5GFX and FreeRTOS and drives every screen, every action
+and every key under AddressSanitizer — because a bad index in the UI reboots the
+device rather than misdrawing:
 
 ```bash
-make -C test test
+make -C test all-tests
 ```
 
 ## Flash
@@ -184,7 +188,10 @@ SynthCard/
     storage/
       storage.{h,cpp}    SD projects, NVS settings
       serialize.cpp      versioned project format
-  test/                  host unit tests (no Arduino needed)
+  test/                  host tests (no Arduino needed)
+    unit_tests.cpp       DSP, sequencer, music theory, file format
+    ui_tests.cpp         every screen/action/key under ASan + UBSan
+    stub/                host stand-ins for M5GFX and FreeRTOS
   tools/package.sh       build + size check + merged image
 ```
 

@@ -11,6 +11,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run host unit tests
         run: make -C test test
+      - name: Run UI tests under AddressSanitizer
+        run: make -C test ui-test
   firmware:
     runs-on: ubuntu-latest
     steps:
