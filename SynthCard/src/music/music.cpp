@@ -52,6 +52,42 @@ void noteName(uint8_t note, char* buf, int len) {
     snprintf(buf, len, "%s%d", kNoteNames[note % 12], (int)(note / 12) - 1);
 }
 
+// -------------------------------------------------------------- chords -----
+const char* const kChordNames[CHORD_COUNT] = {"OFF", "POWER", "TRIAD", "7TH"};
+
+// Which scale degree a note sits on, so thirds can be stacked inside the key.
+static int noteToDegree(uint8_t note, uint8_t rootPc, uint8_t scaleIdx) {
+    for (int d = -24; d < 60; ++d)
+        if (scaleDegree(rootPc, d, scaleIdx) >= note) return d;
+    return 0;
+}
+
+int buildChord(uint8_t note, uint8_t type, uint8_t root, uint8_t scaleIdx, uint8_t out[4]) {
+    int n = 0;
+    out[n++] = note;
+    switch (type) {
+        case CHORD_POWER:
+            out[n++] = (uint8_t)clampi(note + 7, 0, 127);
+            out[n++] = (uint8_t)clampi(note + 12, 0, 127);
+            break;
+        case CHORD_TRIAD:
+        case CHORD_SEVENTH:
+            if (scaleIdx == 0) {                    // chromatic: plain major
+                out[n++] = (uint8_t)clampi(note + 4, 0, 127);
+                out[n++] = (uint8_t)clampi(note + 7, 0, 127);
+                if (type == CHORD_SEVENTH) out[n++] = (uint8_t)clampi(note + 11, 0, 127);
+            } else {
+                const int d = noteToDegree(note, root, scaleIdx);
+                out[n++] = scaleDegree(root, d + 2, scaleIdx);
+                out[n++] = scaleDegree(root, d + 4, scaleIdx);
+                if (type == CHORD_SEVENTH) out[n++] = scaleDegree(root, d + 6, scaleIdx);
+            }
+            break;
+        default: break;
+    }
+    return n;
+}
+
 // ------------------------------------------------------------- arpeggiator --
 const char* const kArpModeNames[ARP_MODE_COUNT] = {"UP", "DOWN", "UP/DN", "RANDOM", "ORDER"};
 const char* const kArpRateNames[6] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};

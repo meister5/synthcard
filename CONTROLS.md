@@ -81,8 +81,8 @@ back the way it was. Pressing `CTRL`+`Z` again redoes it.
 If you are recording into an empty pattern with no drums yet, turn on the
 metronome (`SYS` → `METRONOME` → `REC ONLY`) so you have something to play to.
 
-In chord mode only the root is recorded, because a sequencer track plays one
-note at a time.
+Chord mode is recorded too: the step keeps your root note plus the chord type,
+and plays the whole chord back.
 
 ## Step keys
 
@@ -117,11 +117,19 @@ between the LEAD and BASS track. The scope shows the master output.
 
 **SEQ** — `FN`+`;`/`.` picks the track. Playing a note key writes it into the
 selected step and advances. `O`/`P` picks the field (note / velocity / gate /
-probability), `[`/`]` edits it. `ENTER` mutes a step, `BKSP` clears it.
+chord / probability), `[`/`]` edits it. `ENTER` mutes a step, `BKSP` clears it.
 
 The pattern bank is drawn across the top of this page: the lit slot is what
 you are editing, and `SHIFT`+`1`…`8` or `SHIFT`+`[`/`]` moves between them.
 Patterns longer than 16 steps show `PG 1/2`; `FN`+`,`/`/` turns the page.
+
+**Chords** — the `CHRD` field turns a step into `POWER`, `TRIAD` or `7TH`. The
+step still stores one root note; the chord is voiced at playback from the
+song's scale and root, so it stays in key and follows a change of key. The
+piano roll draws every tone it will actually play. Recording with chord mode on
+stamps the chord onto the step, so playback is what you heard.
+
+A mono or legato patch plays the root only — one voice is one note.
 
 **Note length** — the `GATE` field runs from `1/16` of a step up to `16/16`,
 then keeps going in whole steps: `2STP`, `3STP` … `17STP`. So a pad can hold

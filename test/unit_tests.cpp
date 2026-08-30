@@ -567,6 +567,98 @@ static void testPatternLength() {
     }
 }
 
+static void testChords() {
+    uint8_t out[4];
+    // OFF is always exactly the note you gave it.
+    for (int n = 24; n < 100; ++n) {
+        int c = buildChord((uint8_t)n, CHORD_OFF, 0, 0, out);
+        CHECK(c == 1 && out[0] == n, "CHORD_OFF changed note %d", n);
+    }
+    // Chromatic falls back to a plain major triad / dominant seventh.
+    CHECK(buildChord(60, CHORD_TRIAD, 0, 0, out) == 3, "chromatic triad size");
+    CHECK(out[0] == 60 && out[1] == 64 && out[2] == 67, "chromatic triad = %d %d %d",
+          out[0], out[1], out[2]);
+    CHECK(buildChord(60, CHORD_SEVENTH, 0, 0, out) == 4, "chromatic 7th size");
+    CHECK(out[3] == 71, "chromatic 7th top = %d", out[3]);
+    CHECK(buildChord(60, CHORD_POWER, 0, 0, out) == 3, "power chord size");
+    CHECK(out[1] == 67 && out[2] == 72, "power chord = %d %d", out[1], out[2]);
+
+    // In a scale, every chord tone must stay in that scale, at every root.
+    for (uint8_t sc = 1; sc < kScaleCount; ++sc) {
+        for (uint8_t root = 0; root < 12; ++root) {
+            for (int n = 36; n < 84; ++n) {
+                uint8_t base = scaleQuantize(n, root, sc);
+                for (uint8_t type = CHORD_TRIAD; type <= CHORD_SEVENTH; ++type) {
+                    int c = buildChord(base, type, root, sc, out);
+                    CHECK(c >= 1 && c <= 4, "chord count %d", c);
+                    CHECK(out[0] == base, "chord root moved");
+                    for (int k = 0; k < c; ++k) {
+                        int rel = ((out[k] - root) % 12 + 12) % 12;
+                        bool in = false;
+                        for (uint8_t i = 0; i < kScales[sc].n; ++i)
+                            if (kScales[sc].iv[i] == rel) in = true;
+                        CHECK(in, "scale %s root %d: chord tone %d is out of key",
+                              kScales[sc].name, root, out[k]);
+                        CHECK(out[k] >= out[0], "chord tone %d below the root %d", out[k], out[0]);
+                        if (!in) return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A step carrying a chord must voice every tone, and release every tone.
+static void testChordPlayback() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 120;
+    proj.scale = 1;                       // major
+    proj.root = 0;
+    proj.pat[0].length = 4;
+    for (int i = 0; i < 4; ++i) proj.pat[0].mel[0][i].note = 0;
+    Step& st = proj.pat[0].mel[0][0];
+    st.note = 60; st.vel = 100; st.gate = 7; st.chord = CHORD_TRIAD;
+
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+    seq.play();
+    runSeq(seq, sink, 4000 * 4);
+    CHECK(sink.noteOns == 3, "triad step gave %d note-ons, expected 3", sink.noteOns);
+    CHECK(sink.noteOffs == 3, "triad step gave %d note-offs, expected 3", sink.noteOffs);
+
+    // Every tone must be released together at the gate, or voices leak.
+    if (sink.offSteps.size() == 3)
+        CHECK(sink.offSteps[0] == sink.offSteps[2], "chord tones released at different times");
+
+    // Switching the whole song to a minor key must reshape the chord, because
+    // the step stores a root and a type rather than fixed pitches.
+    proj.scale = 2;                       // natural minor
+    CountingSink minorSink;
+    Sequencer q;
+    q.init(&proj, &minorSink);
+    q.play();
+    runSeq(q, minorSink, 4000);
+    CHECK(minorSink.noteOns == 3, "minor triad gave %d note-ons", minorSink.noteOns);
+    // A mono patch must collapse the chord to its root rather than voice-steal
+    // its way to the top note.
+    proj.scale = 1;
+    proj.patch[0].set(P_VOICE_MODE, 1);          // mono
+    CountingSink monoSink;
+    Sequencer m;
+    m.init(&proj, &monoSink);
+    m.play();
+    runSeq(m, monoSink, 4000);
+    CHECK(monoSink.noteOns == 1, "mono patch voiced %d notes of a triad", monoSink.noteOns);
+    proj.patch[0].set(P_VOICE_MODE, 0);
+
+    uint8_t maj[4], min[4];
+    buildChord(60, CHORD_TRIAD, 0, 1, maj);
+    buildChord(60, CHORD_TRIAD, 0, 2, min);
+    CHECK(maj[1] == 64 && min[1] == 63, "major third %d, minor third %d", maj[1], min[1]);
+}
+
 static void testScales() {
     CHECK(kScaleCount >= 8, "only %d scales", (int)kScaleCount);
     for (uint8_t sc = 1; sc < kScaleCount; ++sc) {
@@ -733,6 +825,9 @@ static void testProjectFormat() {
         randomDrums(a.pat[i], rng, 60);
         randomMelody(a.pat[i], 0, rng, 0, 2, 4);
         randomBass(a.pat[i], 1, rng, 0, 2, 3);
+        for (int t = 0; t < kMelTracks; ++t)
+            for (int st = 0; st < kMaxSteps; ++st)
+                a.pat[i].mel[t][st].chord = (uint8_t)((i + t + st) % CHORD_COUNT);
         a.pat[i].muteDrum = (uint16_t)(i * 3);
         a.pat[i].muteMel = (uint8_t)(i & 1);
     }
@@ -790,6 +885,85 @@ static void testProjectFormat() {
     CHECK(!projectDeserialize(c, buf, 4), "accepted a 4-byte file");
 }
 
+// Builds a project file in the v1 layout (before Step gained a chord byte) so
+// that songs saved by the shipped firmware are proven to still load.
+static int writeV1Blob(const Project& p, uint8_t* b) {
+    int n = 0;
+    auto u8  = [&](uint8_t v) { b[n++] = v; };
+    auto u16 = [&](uint16_t v) { u8((uint8_t)(v & 0xFF)); u8((uint8_t)(v >> 8)); };
+    auto u32 = [&](uint32_t v) { u16((uint16_t)(v & 0xFFFF)); u16((uint16_t)(v >> 16)); };
+    auto raw = [&](const void* s2, int l) { memcpy(b + n, s2, l); n += l; };
+
+    u32(kProjectMagic);
+    u16(1);
+    raw(p.name, kNameLen);
+    u16(p.bpm);
+    u8(p.swing); u8(p.scale); u8(p.root); u8(p.octave);
+    u8(p.arpOn); u8(p.arpMode); u8(p.arpRate); u8(p.arpOct); u8(p.arpGate);
+    u8(kPatternCount); u8(kMelTracks); u8(DL_COUNT); u8(kMaxSteps);
+    for (int i = 0; i < kPatternCount; ++i) {
+        const Pattern& pa = p.pat[i];
+        raw(pa.name, 9);
+        u8(pa.length); u8(pa.muteMel); u16(pa.muteDrum);
+        for (int t = 0; t < kMelTracks; ++t)
+            for (int st = 0; st < kMaxSteps; ++st) {          // 4 bytes, no chord
+                u8(pa.mel[t][st].note); u8(pa.mel[t][st].vel);
+                u8(pa.mel[t][st].gate); u8(pa.mel[t][st].flags);
+            }
+        for (int l = 0; l < DL_COUNT; ++l) raw(pa.drum[l], kMaxSteps);
+    }
+    u8(p.song.length);
+    for (int i = 0; i < kSongSlots; ++i) { u8(p.song.slot[i].pattern); u8(p.song.slot[i].repeat); }
+    u8(P_COUNT);
+    for (int t = 0; t < kMelTracks; ++t) { raw(p.patch[t].name, 13); raw(p.patch[t].p, P_COUNT); }
+    raw(p.kit.name, 13);
+    for (int l = 0; l < DL_COUNT; ++l) raw(p.kit.p[l], DP_COUNT);
+    u8(p.kit.sendDly); u8(p.kit.sendRev);
+    u8(FX_COUNT);
+    raw(p.fx.p, FX_COUNT);
+
+    uint32_t h = 2166136261u;                                 // FNV-1a, as shipped
+    for (int i = 0; i < n; ++i) { h ^= b[i]; h *= 16777619u; }
+    u32(h);
+    return n;
+}
+
+static void testV1Compatibility() {
+    static uint8_t buf[kProjectBufSize];
+    Project src;
+    src.reset();
+    strncpy(src.name, "OLDSONG", kNameLen - 1);
+    src.bpm = 143;
+    Rng rng; rng.s = 99;
+    for (int i = 0; i < kPatternCount; ++i) {
+        src.pat[i].length = (uint8_t)(4 + i);
+        randomDrums(src.pat[i], rng, 60);
+        randomMelody(src.pat[i], 0, rng, 0, 2, 4);
+    }
+    loadPreset(src.patch[0], 7);
+    loadKit(src.kit, 3);
+
+    const int n = writeV1Blob(src, buf);
+    Project got;
+    CHECK(projectDeserialize(got, buf, n), "a v1 project no longer loads");
+    CHECK(strcmp(got.name, "OLDSONG") == 0, "v1 name lost: %s", got.name);
+    CHECK(got.bpm == 143, "v1 tempo lost: %d", got.bpm);
+    for (int i = 0; i < kPatternCount; ++i) {
+        CHECK(got.pat[i].length == src.pat[i].length, "v1 pattern %d length lost", i);
+        for (int t = 0; t < kMelTracks; ++t)
+            for (int st = 0; st < kMaxSteps; ++st) {
+                CHECK(got.pat[i].mel[t][st].note == src.pat[i].mel[t][st].note,
+                      "v1 pattern %d note %d lost", i, st);
+                CHECK(got.pat[i].mel[t][st].chord == CHORD_OFF,
+                      "v1 step got chord %d, expected OFF", got.pat[i].mel[t][st].chord);
+            }
+        CHECK(memcmp(got.pat[i].drum[DL_KICK], src.pat[i].drum[DL_KICK], kMaxSteps) == 0,
+              "v1 pattern %d kick lane lost", i);
+    }
+    CHECK(memcmp(got.patch[0].p, src.patch[0].p, P_COUNT) == 0, "v1 patch lost");
+    CHECK(memcmp(got.kit.p, src.kit.p, sizeof(src.kit.p)) == 0, "v1 kit lost");
+}
+
 // ---------------------------------------------------------------------------
 int main() {
     printf("SynthCard unit tests\n");
@@ -807,6 +981,8 @@ int main() {
     testGateLengths();
     testRecordedLength();
     testEraseStep();
+    testChords();
+    testChordPlayback();
     testMetronome();
     testPatternLength();
     testScales();
@@ -814,6 +990,7 @@ int main() {
     testArp();
     testGenerators();
     testProjectFormat();
+    testV1Compatibility();
     printf("%d checks, %d failures\n", g_run, g_fail);
     return g_fail ? 1 : 0;
 }

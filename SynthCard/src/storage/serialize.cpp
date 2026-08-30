@@ -52,6 +52,7 @@ int projectSerialize(const Project& p, uint8_t* buf, int cap) {
             for (int s = 0; s < kMaxSteps; ++s) {
                 w.u8(pa.mel[t][s].note); w.u8(pa.mel[t][s].vel);
                 w.u8(pa.mel[t][s].gate); w.u8(pa.mel[t][s].flags);
+                w.u8(pa.mel[t][s].chord);
             }
         for (int l = 0; l < DL_COUNT; ++l) w.bytes(pa.drum[l], kMaxSteps);
     }
@@ -102,6 +103,7 @@ bool projectDeserialize(Project& p, const uint8_t* buf, int len) {
             for (int s = 0; s < nSteps; ++s) {
                 pa.mel[t][s].note = r.u8(); pa.mel[t][s].vel = r.u8();
                 pa.mel[t][s].gate = r.u8(); pa.mel[t][s].flags = r.u8();
+                pa.mel[t][s].chord = (ver >= 2) ? r.u8() : (uint8_t)CHORD_OFF;
             }
         for (int l = 0; l < nDrum; ++l) r.bytes(pa.drum[l], nSteps);
     }
@@ -147,6 +149,7 @@ bool projectDeserialize(Project& p, const uint8_t* buf, int len) {
                 if (st.note > 127) st.note = 0;
                 if (st.vel > 127) st.vel = 100;
                 if (st.gate > kGateMax) st.gate = 8;
+                if (st.chord >= CHORD_COUNT) st.chord = CHORD_OFF;
             }
     for (int i = 0; i < kPatternCount; ++i)
         for (int j = 0; j < kSongSlots; ++j)

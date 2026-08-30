@@ -93,7 +93,7 @@ Full reference in [CONTROLS.md](CONTROLS.md), and on the device under
 | --- | --- | --- |
 | 1 | **PLAY** | Live keyboard, scope, cutoff/resonance under your fingers, drum pads on the number row. The "pulled it out of my pocket" screen. |
 | 2 | **DRUM** | Nine lanes × up to 64 steps, 16 direct step keys, per-lane tune/decay/tone/level, seven kits. |
-| 3 | **SEQ** | Piano-roll step editor for the LEAD and BASS tracks: note, velocity, gate, probability, slide, per-step mute. |
+| 3 | **SEQ** | Piano-roll step editor for the LEAD and BASS tracks: note, velocity, gate, chord, probability, slide, per-step mute. |
 | 4 | **SOUND** | Seven pages of synth parameters for the selected track. |
 | 5 | **FX** | Delay, reverb, chorus, drive, master level. |
 | 6 | **SONG** | Chain up to 64 pattern slots with repeat counts. |
@@ -125,7 +125,7 @@ nothing to load off the card.
 
 **Sequencer** — Eight patterns, 1–64 steps each (resizable live from any
 screen), three tracks per pattern
-(LEAD, BASS, and the nine drum lanes). Per-step note, velocity, gate length,
+(LEAD, BASS, and the nine drum lanes). Per-step note, velocity, gate length, chord,
 probability, slide and mute. Gates run from a sixteenth of a step up to
 seventeen whole steps, so notes can sustain across the bar. Global swing,
 BPM 40–300, tap tempo. Patterns
@@ -138,6 +138,12 @@ notes out again. Switch tracks and keep layering. Nothing is destructive —
 every recorded step is editable afterwards on the SEQ page, and `CTRL`+`Z`
 undoes a whole take. A metronome (off / always / while recording only) gives
 you something to play to when the pattern is still empty.
+
+**Chords** — A step stores a root note plus a chord type (power, triad or
+seventh) rather than fixed pitches, and the voicing is built at playback from
+the song's scale and root. Chords therefore stay in key, and changing the key
+reshapes every chord in the song instead of breaking it. Recording with chord
+mode on stamps the type onto the step; a mono patch plays the root alone.
 
 **Performance** — Ten scales (chromatic, major, minor, both pentatonics, blues,
 dorian, mixolydian, harmonic minor, phrygian) that constrain the keyboard to
@@ -221,8 +227,10 @@ firmware works fine with no card inserted.
 
 The format is an explicit little-endian field-by-field encoding — magic `SCPJ`,
 a version, then tempo, key, all eight patterns, the song, both patches, the kit
-and the effect settings — ending in an FNV-1a checksum. A project is 9,146
-bytes. Loading validates the magic, the version, the checksum, the length and
+and the effect settings — ending in an FNV-1a checksum. A project is 10,170
+bytes. The reader is version-aware and still loads v1 files (written before
+steps carried a chord), which the test suite proves against a hand-built v1
+image rather than by assertion. Loading validates the magic, the version, the checksum, the length and
 every field range, so a truncated or corrupt file is reported, not crashed on.
 
 Audio is suspended around every card access: the SPI transfer and FAT

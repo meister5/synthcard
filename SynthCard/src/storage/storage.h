@@ -33,7 +33,7 @@ int  projectList(char out[][kNameLen], int maxCount);
 
 // Serialisation is split out so it can be exercised by the host unit tests.
 constexpr uint32_t kProjectMagic   = 0x4A504353u;   // 'SCPJ'
-constexpr uint16_t kProjectVersion = 1;
+constexpr uint16_t kProjectVersion = 2;   // v2 added Step::chord
 int  projectSerialize(const Project& p, uint8_t* buf, int cap);
 bool projectDeserialize(Project& p, const uint8_t* buf, int len);
 constexpr int kProjectBufSize = 12288;

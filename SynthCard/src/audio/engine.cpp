@@ -79,6 +79,7 @@ void AudioEngine::handle(const Event& e) {
         case EV_ARP_ON:  arp_.setEnabled(e.a != 0); if (!e.a) killAll(); break;
         case EV_ERASE_STEP: seq_.eraseStep(e.a); break;
         case EV_METRO: seq_.setMetronome(e.a); break;
+        case EV_REC_CHORD: seq_.setRecordChord(e.a); break;
         case EV_UNDO: {
             if (!undo_) break;
             // Byte-wise swap: no 9 KB temporary on a 4 KB task stack, and the

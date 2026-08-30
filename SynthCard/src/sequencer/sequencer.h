@@ -9,6 +9,7 @@
 #include "../audio/patch.h"
 #include "../audio/drums.h"
 #include "../audio/effects.h"
+#include "../music/chords.h"
 
 namespace synth {
 
@@ -28,6 +29,7 @@ struct Step {
     // plays back as long as you held it.
     uint8_t gate;
     uint8_t flags;   // SF_* in the low nibble, probability 0..8 in the high nibble
+    uint8_t chord;   // ChordType: the step's root is expanded in the song's key
     inline bool  on()   const { return note != 0 && !(flags & SF_MUTE); }
     inline uint8_t prob() const { return (uint8_t)(flags >> 4); }     // 0 = always
     inline void setProb(uint8_t p) { flags = (uint8_t)((flags & 0x0F) | ((p & 0x0F) << 4)); }
@@ -105,6 +107,8 @@ public:
     void advance(int samples);          // fires step/gate events when due
 
     // --- recording ---------------------------------------------------------
+    // Chord type stamped onto steps by live recording (the keyboard's setting).
+    void setRecordChord(uint8_t c) { recChord_ = c < (uint8_t)CHORD_COUNT ? c : (uint8_t)CHORD_OFF; }
     void setMetronome(uint8_t mode) { metro_ = mode < (uint8_t)METRO_COUNT ? mode : (uint8_t)METRO_OFF; }
     inline uint8_t metronome() const { return metro_; }
     void setRecording(bool on);
@@ -126,6 +130,7 @@ public:
 
 private:
     void fireStep();
+    void releaseTrack(uint8_t track);
     int  stepSamples(int stepIndex) const;
 
     Project* proj_ = nullptr;
@@ -136,7 +141,10 @@ private:
     int      curStep_ = 0;
     int      stepCountdown_ = 1;
     int      gateCountdown_[kMelTracks] = {0, 0};
-    uint8_t  soundingNote_[kMelTracks] = {0, 0};
+    // Up to four notes can be sounding per track once a step carries a chord.
+    uint8_t  soundingNote_[kMelTracks][4] = {{0}};
+    uint8_t  soundingCount_[kMelTracks] = {0, 0};
+    uint8_t  recChord_ = CHORD_OFF;
     int      curStepSamples_ = 1;
     uint32_t sampleClock_ = 0;
     uint8_t  metro_ = METRO_OFF;

@@ -5,6 +5,7 @@
 #include "input/keys.h"
 #include "storage/storage.h"
 #include "sequencer/sequencer.h"
+#include "music/music.h"
 
 namespace synth {
 
@@ -14,9 +15,6 @@ enum Mode : uint8_t {
 extern const char* const kModeNames[M_COUNT];
 
 enum BootChoice : uint8_t { BOOT_JAM = 0, BOOT_NEW, BOOT_LOAD, BOOT_COUNT };
-enum ChordMode : uint8_t { CH_OFF = 0, CH_POWER, CH_TRIAD, CH_SEVENTH, CH_COUNT };
-extern const char* const kChordNames[CH_COUNT];
-
 struct App {
     Project     proj;
     AudioEngine engine;
@@ -39,7 +37,7 @@ struct App {
 
     uint16_t presetIndex[kMelTracks] = {0, 5};
     uint8_t  kitIndex = 0;
-    uint8_t  chordMode = CH_OFF;
+    uint8_t  chordMode = CHORD_OFF;   // live keyboard; steps carry their own
     uint8_t  euclidHits = 4, euclidRot = 0;
 
     // live keyboard bookkeeping: which notes each physical key started

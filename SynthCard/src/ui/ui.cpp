@@ -7,7 +7,6 @@ namespace synth {
 
 const char* const kModeNames[M_COUNT] =
     {"PLAY", "DRUM", "SEQ", "SOUND", "FX", "SONG", "FILE", "SYS"};
-const char* const kChordNames[CH_COUNT] = {"OFF", "POWER", "TRIAD", "7TH"};
 
 // Constructed inside uiBegin() rather than at static-init time: the sprite
 // reads settings off M5.Display, which is not brought up until M5.begin().
@@ -220,7 +219,7 @@ static const HelpPage kModeHelp[M_COUNT] = {
     {"SEQ", {
         "1..8  Q..I      pick step 1-16",
         "Z..? keys    set note, cursor moves",
-        "O / P           field, [ / ] changes it",
+        "O / P    field (CHRD = chord on a step)",
         "GATE past 16/16 = 2STP..17STP holds",
         "FN+, / FN+/     page (steps 17+)",
         "FN+; / FN+.     LEAD <-> BASS track",

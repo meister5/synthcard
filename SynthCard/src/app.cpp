@@ -66,42 +66,6 @@ void snapshotUndo(App& app) {
 // ===========================================================================
 // live keyboard
 // ===========================================================================
-// Which scale degree a note sits on, so chord mode can stack thirds that stay
-// inside the current key.
-static int noteToDegree(uint8_t note, uint8_t rootPc, uint8_t scaleIdx) {
-    int rootNote = rootPc;
-    while (rootNote + 12 <= (int)note) rootNote += 12;
-    for (int d = -24; d < 60; ++d)
-        if (scaleDegree(rootPc, d, scaleIdx) >= note) return d;
-    return 0;
-}
-
-static void buildChord(const App& app, uint8_t note, uint8_t* out, int& n) {
-    n = 0;
-    out[n++] = note;
-    switch (app.chordMode) {
-        case CH_POWER:
-            out[n++] = (uint8_t)clampi(note + 7, 0, 127);
-            out[n++] = (uint8_t)clampi(note + 12, 0, 127);
-            break;
-        case CH_TRIAD:
-        case CH_SEVENTH: {
-            if (app.proj.scale == 0) {
-                out[n++] = (uint8_t)clampi(note + 4, 0, 127);
-                out[n++] = (uint8_t)clampi(note + 7, 0, 127);
-                if (app.chordMode == CH_SEVENTH) out[n++] = (uint8_t)clampi(note + 11, 0, 127);
-            } else {
-                int d = noteToDegree(note, app.proj.root, app.proj.scale);
-                out[n++] = scaleDegree(app.proj.root, d + 2, app.proj.scale);
-                out[n++] = scaleDegree(app.proj.root, d + 4, app.proj.scale);
-                if (app.chordMode == CH_SEVENTH) out[n++] = scaleDegree(app.proj.root, d + 6, app.proj.scale);
-            }
-            break;
-        }
-        default: break;
-    }
-}
-
 static void noteKeyDown(App& app, uint8_t id, int8_t semi, const Mods& m) {
     if (app.mode == M_DRUM) {
         int8_t lane = keyToDrumLane(id);
@@ -116,10 +80,11 @@ static void noteKeyDown(App& app, uint8_t id, int8_t semi, const Mods& m) {
     n = clampi(n, 0, 127);
 
     uint8_t vel = m.shift ? 127 : (m.alt ? 62 : 100);
-    uint8_t chord[4];
-    int cn = 0;
-    buildChord(app, (uint8_t)n, chord, cn);
     const uint8_t tr = app.engine.liveTrack();
+    uint8_t chord[4];
+    // Same rule as the sequencer: a mono patch plays the root, not the top.
+    const uint8_t type = app.proj.patch[tr].get(P_VOICE_MODE) ? (uint8_t)CHORD_OFF : app.chordMode;
+    const int cn = buildChord((uint8_t)n, type, app.proj.root, app.proj.scale, chord);
     for (int i = 0; i < cn && i < 4; ++i) {
         app.keyNotes[id][i] = chord[i];
         // Only the root is recorded; a sequencer track is monophonic, so
@@ -370,7 +335,8 @@ static void menuActivate(App& app) {
                 showToast(app, "RANDOM LEAD"); break;
         case 7: randomizePatch(app.proj.patch[app.engine.liveTrack()], app.rng, 45);
                 showToast(app, "RANDOM SOUND"); break;
-        case 8: app.chordMode = (uint8_t)((app.chordMode + 1) % CH_COUNT); break;
+        case 8: app.chordMode = (uint8_t)((app.chordMode + 1) % CHORD_COUNT);
+                app.engine.setRecordChord(app.chordMode); break;
         case 9: app.proj.scale = (uint8_t)((app.proj.scale + 1) % kScaleCount); break;
         case 10: app.proj.root = (uint8_t)((app.proj.root + 1) % 12); break;
         case 11: app.proj.swing = (uint8_t)((app.proj.swing + 5) % 105); break;
@@ -507,6 +473,7 @@ void appSetup() {
     a.engine.begin(&a.proj);
     a.engine.setUndoBuffer(&a.undoBuf);
     a.engine.setMetronome(a.settings.metronome);
+    a.engine.setRecordChord(a.chordMode);
     audioSetVolume(a.settings.volume);
     if (!audioStart(&a.engine)) {
         showToast(a, "AUDIO INIT FAILED", true);

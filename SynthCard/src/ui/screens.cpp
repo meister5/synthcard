@@ -242,8 +242,8 @@ static bool actDrum(App& a, const Action& act) {
 // ===========================================================================
 // SEQ
 // ===========================================================================
-static const char* const kSeqFields[] = {"NOTE", "VEL", "GATE", "PROB"};
-constexpr int kSeqFieldCount = 4;
+static const char* const kSeqFields[] = {"NOTE", "VEL", "GATE", "CHRD", "PROB"};
+constexpr int kSeqFieldCount = 5;
 
 static void drawSeq(App& a, int, int y0, int w, int h) {
     M5Canvas& g = uiCanvas();
@@ -272,11 +272,15 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
 
     // auto-ranged piano roll
     int lo = 127, hi = 0;
+    uint8_t voicing[4];
     for (int i = 0; i < len; ++i) {
-        uint8_t n = p.mel[tr][i].note;
-        if (!n) continue;
-        if (n < lo) lo = n;
-        if (n > hi) hi = n;
+        const Step& st0 = p.mel[tr][i];
+        if (!st0.note) continue;
+        int vn = buildChord(st0.note, st0.chord, a.proj.root, a.proj.scale, voicing);
+        for (int k = 0; k < vn; ++k) {
+            if (voicing[k] < lo) lo = voicing[k];
+            if (voicing[k] > hi) hi = voicing[k];
+        }
     }
     if (lo > hi) { lo = 48; hi = 72; }
     if (hi - lo < 12) { int c = (lo + hi) / 2; lo = c - 6; hi = c + 6; }
@@ -293,12 +297,18 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
         if (st == playStep) g.fillRect(cx, rollY, cellW - 1, rollH, C_PANEL2);
         const Step& stp = p.mel[tr][st];
         if (stp.note) {
-            int ny = rollY + rollH - 3 - ((stp.note - lo) * (rollH - 6)) / (hi - lo ? hi - lo : 1);
-            // A note longer than one step draws across the steps it covers.
-            int gw = clampi((cellW * gateSixteenths(stp.gate)) / 16 - 1, 2, 16 * cellW - (cx - gx));
-            uint16_t c = (stp.flags & SF_MUTE) ? C_FAINT : (stp.vel > 110 ? C_ACCENT : C_ACC2);
-            g.fillRect(cx + 1, ny, gw, 3, c);
-            if (stp.flags & SF_SLIDE) g.drawFastHLine(cx + 1, ny + 4, cellW - 3, C_ACCENT);
+            // A note longer than one step draws across the steps it covers, and
+            // a chord draws every tone it will actually voice.
+            const int gw = clampi((cellW * gateSixteenths(stp.gate)) / 16 - 1, 2, 16 * cellW - (cx - gx));
+            const int span = (hi - lo) ? (hi - lo) : 1;
+            const uint16_t root = (stp.flags & SF_MUTE) ? C_FAINT : (stp.vel > 110 ? C_ACCENT : C_ACC2);
+            const int vn = buildChord(stp.note, stp.chord, a.proj.root, a.proj.scale, voicing);
+            for (int k = vn - 1; k >= 0; --k) {
+                int ny = rollY + rollH - 3 - ((voicing[k] - lo) * (rollH - 6)) / span;
+                g.fillRect(cx + 1, ny, gw, 3, k == 0 ? root : C_FAINT);
+            }
+            int ny0 = rollY + rollH - 3 - ((stp.note - lo) * (rollH - 6)) / span;
+            if (stp.flags & SF_SLIDE) g.drawFastHLine(cx + 1, ny0 + 4, cellW - 3, C_ACCENT);
             if (stp.prob()) g.drawPixel(cx + cellW - 3, rollY + 2, C_REC);
         }
         if (st == (base + (a.seqStep % 16))) g.drawRect(cx, rollY, cellW - 1, rollH, C_ACCENT);
@@ -379,6 +389,20 @@ static bool actSeq(App& a, const Action& act) {
                     formatGate(s.gate, vl, sizeof(vl));
                     showParam(a, "GATE", vl, s.gate / (float)kGateMax);
                     break;
+                case 3: {
+                    s.chord = (uint8_t)((s.chord + CHORD_COUNT + dir) % CHORD_COUNT);
+                    showParam(a, "CHORD", kChordNames[s.chord], -1.0f);
+                    // Audition the whole voicing, not just the root.
+                    if (s.note) {
+                        uint8_t ch[4];
+                        int cn = buildChord(s.note, s.chord, a.proj.root, a.proj.scale, ch);
+                        for (int k = 0; k < cn; ++k) {
+                            a.engine.noteOn(tr, ch[k], s.vel);
+                            a.engine.post(EV_NOTE_OFF, tr, ch[k]);
+                        }
+                    }
+                    break;
+                }
                 default: {
                     int pr = clampi(s.prob() + dir, 0, 8);
                     s.setProb((uint8_t)pr);
@@ -704,7 +728,7 @@ static float sysValue(App& a, int row, char* buf, int len) {
         case SR_SWING:    snprintf(buf, len, "%d%%", a.proj.swing);     return a.proj.swing / 100.0f;
         case SR_SCALE:    snprintf(buf, len, "%s", kScales[a.proj.scale % kScaleCount].name); return -1.0f;
         case SR_ROOT:     snprintf(buf, len, "%s", kNoteNames[a.proj.root % 12]); return -1.0f;
-        case SR_CHORD:    snprintf(buf, len, "%s", kChordNames[a.chordMode % CH_COUNT]); return -1.0f;
+        case SR_CHORD:    snprintf(buf, len, "%s", kChordNames[a.chordMode % CHORD_COUNT]); return -1.0f;
         case SR_ARP_MODE: snprintf(buf, len, "%s", kArpModeNames[a.proj.arpMode % ARP_MODE_COUNT]); return -1.0f;
         case SR_ARP_RATE: snprintf(buf, len, "%s", kArpRateNames[a.proj.arpRate % 6]); return -1.0f;
         case SR_ARP_OCT:  snprintf(buf, len, "%d", a.proj.arpOct);      return a.proj.arpOct / 4.0f;
@@ -799,7 +823,8 @@ static bool actSys(App& a, const Action& act) {
                 case SR_ROOT:
                     a.proj.root = (uint8_t)((a.proj.root + 12 + d) % 12); break;
                 case SR_CHORD:
-                    a.chordMode = (uint8_t)((a.chordMode + CH_COUNT + d) % CH_COUNT); break;
+                    a.chordMode = (uint8_t)((a.chordMode + CHORD_COUNT + d) % CHORD_COUNT);
+                    a.engine.setRecordChord(a.chordMode); break;
                 case SR_ARP_MODE:
                     a.proj.arpMode = (uint8_t)((a.proj.arpMode + ARP_MODE_COUNT + d) % ARP_MODE_COUNT); break;
                 case SR_ARP_RATE:

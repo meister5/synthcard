@@ -23,7 +23,7 @@ constexpr int kScopeSize  = 120;
 enum EvType : uint8_t {
     EV_NONE = 0, EV_NOTE_ON, EV_NOTE_OFF, EV_DRUM, EV_ALL_OFF, EV_PANIC,
     EV_PLAY, EV_STOP, EV_TOGGLE, EV_REC, EV_PATTERN, EV_SONGMODE, EV_ARP_ON,
-    EV_ERASE_STEP, EV_METRO, EV_UNDO,
+    EV_ERASE_STEP, EV_METRO, EV_UNDO, EV_REC_CHORD,
 };
 struct Event { uint8_t type, a, b, c; };
 
@@ -42,6 +42,7 @@ public:
     void noteOff(uint8_t track, uint8_t note)             { post(EV_NOTE_OFF, track, note); }
     void eraseStep(uint8_t track)                         { post(EV_ERASE_STEP, track); }
     void setMetronome(uint8_t mode)                       { post(EV_METRO, mode); }
+    void setRecordChord(uint8_t chord)                    { post(EV_REC_CHORD, chord); }
     // The undo buffer is swapped with the live project inside the audio task,
     // so the UI never races the render thread over 9 KB of song data.
     void setUndoBuffer(Project* buf) { undo_ = buf; }
