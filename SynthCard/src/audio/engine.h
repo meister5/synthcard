@@ -23,7 +23,7 @@ constexpr int kScopeSize  = 120;
 enum EvType : uint8_t {
     EV_NONE = 0, EV_NOTE_ON, EV_NOTE_OFF, EV_DRUM, EV_ALL_OFF, EV_PANIC,
     EV_PLAY, EV_STOP, EV_TOGGLE, EV_REC, EV_PATTERN, EV_SONGMODE, EV_ARP_ON,
-    EV_ERASE_STEP,
+    EV_ERASE_STEP, EV_METRO, EV_UNDO,
 };
 struct Event { uint8_t type, a, b, c; };
 
@@ -41,6 +41,11 @@ public:
     void noteOn(uint8_t track, uint8_t note, uint8_t vel) { post(EV_NOTE_ON, track, note, vel); }
     void noteOff(uint8_t track, uint8_t note)             { post(EV_NOTE_OFF, track, note); }
     void eraseStep(uint8_t track)                         { post(EV_ERASE_STEP, track); }
+    void setMetronome(uint8_t mode)                       { post(EV_METRO, mode); }
+    // The undo buffer is swapped with the live project inside the audio task,
+    // so the UI never races the render thread over 9 KB of song data.
+    void setUndoBuffer(Project* buf) { undo_ = buf; }
+    void requestUndo()                                    { post(EV_UNDO); }
     void drumHit(uint8_t lane, uint8_t vel)               { post(EV_DRUM, lane, vel); }
     void panic()                                          { post(EV_PANIC); }
     void setLiveTrack(uint8_t t) { liveTrack_ = t < kMelTracks ? t : 0; }
@@ -64,6 +69,7 @@ public:
     void seqNoteOn(uint8_t track, uint8_t note, uint8_t vel, bool slide) override;
     void seqNoteOff(uint8_t track, uint8_t note) override;
     void seqDrum(uint8_t lane, uint8_t vel) override;
+    void seqClick(bool accent) override;
     void arpNoteOn(uint8_t note, uint8_t vel) override;
     void arpNoteOff(uint8_t note) override;
 
@@ -78,6 +84,10 @@ private:
     void adaptLoad(uint32_t microsUsed, int samples);
 
     Project*  proj_ = nullptr;
+    Project*  undo_ = nullptr;
+    // Metronome click: a short decaying sine, deliberately not a kit sound so
+    // it can never be mistaken for part of the beat.
+    float clickAmp_ = 0.0f, clickPhase_ = 0.0f, clickInc_ = 0.0f, clickDecay_ = 0.0f;
     Sequencer seq_;
     Arp       arp_;
     Voice     voices_[kMaxVoices];

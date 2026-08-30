@@ -219,13 +219,13 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "'  mute lane    FN+BKSP clear lane"}},
     {"SEQ", {
         "1..8  Q..I      pick step 1-16",
-        "Z..? keys       set note, cursor moves on",
+        "Z..? keys    set note, cursor moves",
         "O / P           field, [ / ] changes it",
-        "GATE past 16/16 = 2STP..17STP long notes",
+        "GATE past 16/16 = 2STP..17STP holds",
         "FN+, / FN+/     page (steps 17+)",
         "FN+; / FN+.     LEAD <-> BASS track",
         "SHIFT+1..8      go to pattern 1-8",
-        "SHIFT+[ / ]     previous / next pattern",
+        "SHIFT+[/] pattern  SHIFT+O/P length",
         "ENTER mute step   BKSP clear step"}},
     {"SOUND", {
         "O / P           pick a parameter",
@@ -269,26 +269,26 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "you save."}},
     {"SYS", {
         "FN+; / FN+.     choose a row",
-        "[ / ]           change the value",
+        "[ / ]           change  (FN = x10)",
         "",
-        "Volume, brightness, swing, scale,",
-        "root note and chord mode.",
+        "Volume, brightness, metronome,",
+        "swing, scale, root, chord mode,",
+        "arp rate / octaves / gate and",
+        "pattern length. The list scrolls.",
         "",
-        "The right column is live: CPU load,",
-        "voices, free RAM, frame rate and",
-        "battery."}},
+        "Right column is live: CPU RAM FPS"}},
 };
 
 static const HelpPage kGlobalHelp = {"GLOBAL KEYS", {
-    "SPACE           play / stop",
-    "\\               record arm",
-    "hold BKSP       erase under playhead",
-    "TAB             next tab, FN+1..8 jumps",
-    "SHIFT+1..8      pattern 1-8",
-    "SHIFT+[ / ]     previous / next pattern",
-    "9 / 0  BPM      - / =  octave",
-    "FN+SPACE        tap tempo",
-    "FN+`            menu      `  this help"}};
+    "SPACE  play/stop    \\  record arm",
+    "hold BKSP    erase under playhead",
+    "CTRL+Z       undo  (again = redo)",
+    "TAB next tab       FN+1..8  jump",
+    "SHIFT+1..8     go to pattern 1-8",
+    "SHIFT+[ / ]    prev / next pattern",
+    "SHIFT+O / P    pattern length",
+    "9/0 BPM  -/= octave  FN+SP tap",
+    "FN+`  menu         `  this help"}};
 
 int uiHelpPageCount() { return 2; }
 

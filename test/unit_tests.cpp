@@ -254,6 +254,8 @@ struct CountingSink : SeqSink {
     void seqNoteOn(uint8_t, uint8_t, uint8_t, bool) override { ++noteOns; onSteps.push_back((int)sample); }
     void seqNoteOff(uint8_t, uint8_t) override { ++noteOffs; offSteps.push_back((int)sample); }
     void seqDrum(uint8_t, uint8_t) override { ++drums; }
+    void seqClick(bool accent) override { ++clicks; if (accent) ++accents; }
+    int clicks = 0, accents = 0;
 };
 
 // Runs the clock for `samples`, splitting at every event boundary the way the
@@ -496,6 +498,75 @@ static void testEraseStep() {
     CHECK(proj.pat[0].mel[0][other].note == 60, "erase while stopped removed a note");
 }
 
+static void testMetronome() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 120;
+    proj.pat[0].length = 16;
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+
+    // Off by default.
+    seq.play();
+    runSeq(seq, sink, 4000 * 16);
+    CHECK(sink.clicks == 0, "metronome ticked while off (%d)", sink.clicks);
+
+    // On: a quarter note click, accented on the downbeat.
+    CountingSink on;
+    Sequencer s2;
+    s2.init(&proj, &on);
+    s2.setMetronome(METRO_ON);
+    s2.play();
+    runSeq(s2, on, 4000 * 16);
+    CHECK(on.clicks == 4, "expected 4 clicks in a bar, got %d", on.clicks);
+    CHECK(on.accents == 1, "expected 1 accented click, got %d", on.accents);
+
+    // REC ONLY: silent until armed.
+    CountingSink rec;
+    Sequencer s3;
+    s3.init(&proj, &rec);
+    s3.setMetronome(METRO_REC);
+    s3.play();
+    runSeq(s3, rec, 4000 * 16);
+    CHECK(rec.clicks == 0, "rec-only metronome ticked while not recording (%d)", rec.clicks);
+    s3.setRecording(true);
+    runSeq(s3, rec, 4000 * 16);
+    CHECK(rec.clicks == 4, "rec-only metronome gave %d clicks once armed", rec.clicks);
+}
+
+// Pattern length is now editable, so the clock has to follow it mid-flight.
+static void testPatternLength() {
+    Project proj;
+    proj.reset();
+    proj.bpm = 240;
+    proj.pat[0].length = 4;
+    for (int i = 0; i < kMaxSteps; ++i) proj.pat[0].mel[0][i].note = 60;
+    CountingSink sink;
+    Sequencer seq;
+    seq.init(&proj, &sink);
+    seq.play();
+    const int stepLen = 2000;                       // 240 BPM at 32 kHz
+    runSeq(seq, sink, stepLen * 4);
+    CHECK(sink.noteOns == 4, "4-step pattern gave %d notes in one lap", sink.noteOns);
+    CHECK(seq.step() == 0, "4-step pattern did not wrap (step %d)", seq.step());
+
+    proj.pat[0].length = 32;
+    int before = sink.noteOns;
+    runSeq(seq, sink, stepLen * 8);
+    CHECK(sink.noteOns - before == 8, "after growing to 32 steps got %d notes in 8 steps",
+          sink.noteOns - before);
+    CHECK(seq.step() == 8, "expected step 8, got %d", seq.step());
+
+    // Shrinking under the playhead must not run off the end of the array.
+    proj.pat[0].length = 2;
+    for (int i = 0; i < 200; ++i) {
+        runSeq(seq, sink, stepLen);
+        CHECK(seq.step() < 2, "step %d escaped a 2-step pattern", seq.step());
+        if (seq.step() >= 2) break;
+    }
+}
+
 static void testScales() {
     CHECK(kScaleCount >= 8, "only %d scales", (int)kScaleCount);
     for (uint8_t sc = 1; sc < kScaleCount; ++sc) {
@@ -736,6 +807,8 @@ int main() {
     testGateLengths();
     testRecordedLength();
     testEraseStep();
+    testMetronome();
+    testPatternLength();
     testScales();
     testEuclid();
     testArp();

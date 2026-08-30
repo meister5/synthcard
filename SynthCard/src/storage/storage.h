@@ -16,6 +16,7 @@ constexpr int kNameLen         = 17;
 struct Settings {
     uint8_t volume     = 190;
     uint8_t brightness = 80;
+    uint8_t metronome  = 0;      // MetroMode
     char    lastProject[kNameLen] = {0};
 };
 

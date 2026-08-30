@@ -2,8 +2,14 @@
 #include <M5Unified.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <type_traits>
 
 namespace synth {
+
+// EV_UNDO swaps the live song with the undo buffer byte by byte, which is only
+// legitimate while Project stays a plain aggregate.
+static_assert(std::is_trivially_copyable<Project>::value,
+              "Project must stay trivially copyable for the undo swap");
 
 static constexpr int      kSpkChannel = 0;
 static constexpr uint32_t kOutRate    = (uint32_t)kSampleRate;
@@ -72,6 +78,19 @@ void AudioEngine::handle(const Event& e) {
         case EV_SONGMODE:seq_.setSongMode(e.a != 0); break;
         case EV_ARP_ON:  arp_.setEnabled(e.a != 0); if (!e.a) killAll(); break;
         case EV_ERASE_STEP: seq_.eraseStep(e.a); break;
+        case EV_METRO: seq_.setMetronome(e.a); break;
+        case EV_UNDO: {
+            if (!undo_) break;
+            // Byte-wise swap: no 9 KB temporary on a 4 KB task stack, and the
+            // render pass has not started yet, so it is atomic from its side.
+            uint8_t* a = reinterpret_cast<uint8_t*>(proj_);
+            uint8_t* b = reinterpret_cast<uint8_t*>(undo_);
+            for (size_t i = 0; i < sizeof(Project); ++i) { uint8_t t = a[i]; a[i] = b[i]; b[i] = t; }
+            seq_.allNotesOff();
+            arp_.reset();
+            killAll();
+            break;
+        }
         default: break;
     }
 }
@@ -126,6 +145,13 @@ void AudioEngine::killAll() { for (auto& v : voices_) v.kill(); }
 void AudioEngine::seqNoteOn(uint8_t track, uint8_t note, uint8_t vel, bool slide) { startNote(track, note, vel, slide); }
 void AudioEngine::seqNoteOff(uint8_t track, uint8_t note) { stopNote(track, note); }
 void AudioEngine::seqDrum(uint8_t lane, uint8_t vel) { drums_.trigger(lane, vel); }
+
+void AudioEngine::seqClick(bool accent) {
+    clickPhase_ = 0.0f;
+    clickAmp_   = accent ? 0.5f : 0.28f;
+    clickInc_   = (accent ? 1600.0f : 1050.0f) * kInvSampleRate;
+    clickDecay_ = expf(-6.9f / (0.030f * kSampleRate));      // 30 ms
+}
 void AudioEngine::arpNoteOn(uint8_t note, uint8_t vel) { startNote(liveTrack_, note, vel, false); }
 void AudioEngine::arpNoteOff(uint8_t note) { stopNote(liveTrack_, note); }
 
@@ -183,6 +209,15 @@ void AudioEngine::renderBlock(int16_t* out, int n) {
         mix_[i]     = a + b + d;
         sendDly_[i] = a * sd0 + b * sd1 + d * sdD;
         sendRev_[i] = a * sr0 + b * sr1 + d * srD;
+    }
+    // Added after the send buses are built, so the click never smears into the
+    // delay or reverb - it is a reference, not part of the track.
+    if (clickAmp_ > 0.0005f) {
+        for (int i = 0; i < n; ++i) {
+            clickPhase_ = wrap01(clickPhase_ + clickInc_);
+            mix_[i] += fastSin01(clickPhase_) * clickAmp_ * 0.55f;
+            clickAmp_ *= clickDecay_;
+        }
     }
     fx_.process(mix_, sendDly_, sendRev_, n);
 

@@ -51,6 +51,8 @@ void Project::reset() {
 
 // ---------------------------------------------------------------------------
 
+const char* const kMetroNames[METRO_COUNT] = {"OFF", "ON", "REC ONLY"};
+
 void formatGate(uint8_t gate, char* buf, int len) {
     if (gate < 16) snprintf(buf, len, "%d/16", gate + 1);
     else           snprintf(buf, len, "%dSTP", gate - 14);
@@ -153,6 +155,11 @@ void Sequencer::fireStep() {
     const int len = patternLength(*proj_, curPat_);
     const int s = curStep_ % len;
     curStepSamples_ = stepSamples(s);
+
+    // --- metronome: quarter notes, accented on the downbeat
+    if (metro_ == METRO_ON || (metro_ == METRO_REC && recording_)) {
+        if ((s & 3) == 0) sink_->seqClick(s == 0);
+    }
 
     // --- melodic tracks
     for (int t = 0; t < kMelTracks; ++t) {

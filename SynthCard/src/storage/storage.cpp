@@ -139,6 +139,7 @@ void settingsLoad(Settings& s) {
     if (!pref.begin(kNvsNamespace, true)) return;
     s.volume     = (uint8_t)pref.getUChar("vol", s.volume);
     s.brightness = (uint8_t)pref.getUChar("bri", s.brightness);
+    s.metronome  = (uint8_t)pref.getUChar("met", s.metronome);
     String last  = pref.getString("last", "");
     strncpy(s.lastProject, last.c_str(), kNameLen - 1);
     s.lastProject[kNameLen - 1] = 0;
@@ -150,6 +151,7 @@ void settingsSave(const Settings& s) {
     if (!pref.begin(kNvsNamespace, false)) return;
     pref.putUChar("vol", s.volume);
     pref.putUChar("bri", s.brightness);
+    pref.putUChar("met", s.metronome);
     pref.putString("last", s.lastProject);
     pref.end();
 }

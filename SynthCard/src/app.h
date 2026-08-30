@@ -64,6 +64,12 @@ struct App {
     Pattern clipboard;
     bool    clipboardValid = false;
 
+    // Single-level undo. Holds a whole Project so it covers patterns, patches,
+    // the kit and the FX in one shot; CTRL+Z swaps it with the live song, so a
+    // second press is a redo.
+    Project undoBuf;
+    bool    undoValid = false;
+
     uint32_t tapTimes[4] = {0};
     uint8_t  tapCount = 0;
 
@@ -81,6 +87,7 @@ void applyPreset(App& a, uint8_t track, int index);
 void applyKit(App& a, int index);
 uint8_t liveBaseNote(const App& a);
 void refreshFileList(App& a);
+void snapshotUndo(App& a);
 
 // --- UI entry points --------------------------------------------------------
 void uiBegin();

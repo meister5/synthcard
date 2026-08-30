@@ -60,6 +60,8 @@ crash, perc).
 | `SHIFT`+`1`…`8` | Go to pattern 1–8 (queued until the bar ends while playing) |
 | `SHIFT`+`[` / `SHIFT`+`]` | Previous / next pattern |
 | Hold `BKSP` while playing | Erase whatever is under the playhead |
+| `CTRL`+`Z` | Undo — press again to redo |
+| `SHIFT`+`O` / `SHIFT`+`P` | Pattern length − / + (1–64 steps) |
 
 ## Recording
 
@@ -72,8 +74,15 @@ crash, perc).
 5. `\` again disarms. Everything you recorded is normal pattern data — edit
    any of it on the SEQ page.
 
-`FN`+`BKSP` clears the whole track. In chord mode only the root is recorded,
-because a sequencer track plays one note at a time.
+`FN`+`BKSP` clears the whole track, and `CTRL`+`Z` undoes the whole take —
+arming the recorder takes a snapshot first, so one keypress puts the pattern
+back the way it was. Pressing `CTRL`+`Z` again redoes it.
+
+If you are recording into an empty pattern with no drums yet, turn on the
+metronome (`SYS` → `METRONOME` → `REC ONLY`) so you have something to play to.
+
+In chord mode only the root is recorded, because a sequencer track plays one
+note at a time.
 
 ## Step keys
 
@@ -81,7 +90,9 @@ because a sequencer track plays one note at a time.
 the step under the current lane; on the SEQ page they move the step cursor.
 On the PLAY page they fire the first eight drum lanes as finger pads.
 
-Patterns longer than 16 steps page with `FN`+`,` / `FN`+`/`.
+Patterns longer than 16 steps page with `FN`+`,` / `FN`+`/`. Set the length
+with `SHIFT`+`O` / `SHIFT`+`P` from anywhere, or on the `SYS` page where
+`FN`+`[`/`]` moves it ten steps at a time.
 
 ## Generators (FN + top letter row)
 
@@ -131,5 +142,11 @@ cased so the field always matches the filename); `BKSP` deletes and `ENTER`
 moves on to SAVE. `SPACE`, `TAB` and the `FN` layer stay commands while you
 type. `FN`+`;`/`.` scans the card and walks the file list.
 
-**SYS** — Volume, brightness, swing, scale, root, chord mode, plus live CPU,
-voice count, free RAM, frame rate and battery.
+**SYS** — A scrolling settings list: volume, brightness, metronome, swing,
+scale, root, chord mode, arpeggiator mode / rate / octaves / gate, and pattern
+length. The right column is live: CPU load, voices, free RAM, frame rate and
+battery.
+
+The **metronome** has three settings — `OFF`, `ON`, and `REC ONLY`, which only
+clicks while the recorder is armed. It is a plain quarter-note click, accented
+on the downbeat, and it never reaches the delay or reverb.

@@ -72,7 +72,11 @@ public:
     virtual void seqNoteOn(uint8_t track, uint8_t note, uint8_t vel, bool slide) = 0;
     virtual void seqNoteOff(uint8_t track, uint8_t note) = 0;
     virtual void seqDrum(uint8_t lane, uint8_t vel) = 0;
+    virtual void seqClick(bool accent) = 0;
 };
+
+enum MetroMode : uint8_t { METRO_OFF = 0, METRO_ON, METRO_REC, METRO_COUNT };
+extern const char* const kMetroNames[METRO_COUNT];
 
 class Sequencer {
 public:
@@ -101,6 +105,8 @@ public:
     void advance(int samples);          // fires step/gate events when due
 
     // --- recording ---------------------------------------------------------
+    void setMetronome(uint8_t mode) { metro_ = mode < (uint8_t)METRO_COUNT ? mode : (uint8_t)METRO_OFF; }
+    inline uint8_t metronome() const { return metro_; }
     void setRecording(bool on);
     inline bool recording() const { return recording_; }
     void recordNote(uint8_t track, uint8_t note, uint8_t vel);
@@ -133,6 +139,7 @@ private:
     uint8_t  soundingNote_[kMelTracks] = {0, 0};
     int      curStepSamples_ = 1;
     uint32_t sampleClock_ = 0;
+    uint8_t  metro_ = METRO_OFF;
     // One open recording per melodic track: sequencer tracks are monophonic,
     // so the most recent note is the one whose length we are measuring.
     uint8_t  recNote_[kMelTracks] = {0, 0};

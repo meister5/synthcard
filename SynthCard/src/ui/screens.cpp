@@ -89,14 +89,28 @@ static void drawPlay(App& a, int, int y0, int w, int h) {
     for (int i = 0; i < a.engine.maxVoices(); ++i)
         g.fillRect(sx + i * 7, sy + sh + 38, 5, 4, i < a.engine.activeVoices() ? C_ACC2 : C_FAINT);
 
-    // pattern progress
+    // Step strip: the top band is this track's notes, the thin band under it is
+    // the kick. Without it you cannot see a recorded note land.
     Sequencer& s = a.engine.seq();
     const int len = patternLength(a.proj, s.currentPattern());
-    const int py = y0 + h - 12;
-    bar(g, 4, py, w - 8, 7, s.playing() ? s.progress() : 0.0f,
-        s.recording() ? C_REC : C_ACCENT, C_PANEL);
-    for (int i = 1; i < len; ++i)
-        if (i % 4 == 0) g.drawFastVLine(4 + (w - 8) * i / len, py, 7, C_BG);
+    const int pages = (len + 15) / 16;
+    const int page = (s.playing() && pages > 1) ? (s.step() / 16) % pages : 0;
+    const int base = page * 16;
+    const int py = y0 + h - 13, cw = (w - 8) / 16;
+    for (int i = 0; i < 16; ++i) {
+        const int st = base + i;
+        const int cx = 4 + i * cw;
+        if (st >= len) { g.fillRect(cx, py, cw - 2, 10, C_BG); continue; }
+        g.fillRect(cx, py, cw - 2, 10, (st % 4 == 0) ? C_GRID : C_PANEL);
+        if (pat.mel[tr][st].on())
+            g.fillRect(cx, py, cw - 2, 6, s.recording() ? C_REC : C_ACCENT);
+        if (pat.drum[DL_KICK][st]) g.fillRect(cx, py + 7, cw - 2, 3, C_ACC2);
+        if (s.playing() && st == s.step()) g.drawRect(cx - 1, py - 1, cw, 12, C_TEXT);
+    }
+    if (pages > 1) {
+        snprintf(buf, sizeof(buf), "%d/%d", page + 1, pages);
+        textAt(g, w - 2, py - 10, buf, C_FAINT, &fonts::Font0, textdatum_t::top_right);
+    }
 }
 
 static bool actPlay(App& a, const Action& act) {
@@ -209,10 +223,12 @@ static bool actDrum(App& a, const Action& act) {
         case A_PRESET_PREV: applyKit(a, a.kitIndex - 1); return true;
         case A_PRESET_NEXT: applyKit(a, a.kitIndex + 1); return true;
         case A_CLEAR_TRACK:
+            snapshotUndo(a);
             p.clearTrack((uint8_t)(kMelTracks + a.drumLane));
             showToast(a, "LANE CLEARED");
             return true;
         case A_EUCLID: {
+            snapshotUndo(a);
             a.euclidHits = (uint8_t)(a.euclidHits % (len ? len : 16) + 1);
             applyEuclid(p, a.drumLane, a.euclidHits, a.euclidRot, 100);
             char m[32]; snprintf(m, sizeof(m), "EUCLID %d/%d", a.euclidHits, len);
@@ -336,7 +352,7 @@ static bool actSeq(App& a, const Action& act) {
             return true;
         case A_BACK: s.note = 0; s.flags = 0; return true;
         case A_MUTE: p.muteMel ^= (uint8_t)(1u << tr); return true;
-        case A_CLEAR_TRACK: p.clearTrack(tr); showToast(a, "TRACK CLEARED"); return true;
+        case A_CLEAR_TRACK: snapshotUndo(a); p.clearTrack(tr); showToast(a, "TRACK CLEARED"); return true;
         case A_VALUE_DOWN: case A_VALUE_UP: {
             int dir = (act.act == A_VALUE_UP) ? 1 : -1;
             int big = act.arg > 1 ? 12 : 1;
@@ -669,93 +685,137 @@ static bool actFile(App& a, const Action& act) {
 // ===========================================================================
 // SYS
 // ===========================================================================
-static const char* const kSysRows[] = {"VOLUME", "BRIGHTNESS", "SWING", "SCALE", "ROOT", "CHORD"};
-constexpr int kSysRowCount = 6;
+enum SysRow : uint8_t {
+    SR_VOLUME = 0, SR_BRIGHT, SR_METRO, SR_SWING, SR_SCALE, SR_ROOT, SR_CHORD,
+    SR_ARP_MODE, SR_ARP_RATE, SR_ARP_OCT, SR_ARP_GATE, SR_PAT_LEN, SR_COUNT
+};
+static const char* const kSysRows[SR_COUNT] = {
+    "VOLUME", "BRIGHTNESS", "METRONOME", "SWING", "SCALE", "ROOT", "CHORD",
+    "ARP MODE", "ARP RATE", "ARP OCT", "ARP GATE", "PATTERN LEN"
+};
+constexpr int kSysVisible = 7;
+
+// value text + optional 0..1 bar fraction (negative = no bar)
+static float sysValue(App& a, int row, char* buf, int len) {
+    switch (row) {
+        case SR_VOLUME:   snprintf(buf, len, "%d", audioGetVolume());   return audioGetVolume() / 255.0f;
+        case SR_BRIGHT:   snprintf(buf, len, "%d", a.settings.brightness); return a.settings.brightness / 255.0f;
+        case SR_METRO:    snprintf(buf, len, "%s", kMetroNames[a.settings.metronome % METRO_COUNT]); return -1.0f;
+        case SR_SWING:    snprintf(buf, len, "%d%%", a.proj.swing);     return a.proj.swing / 100.0f;
+        case SR_SCALE:    snprintf(buf, len, "%s", kScales[a.proj.scale % kScaleCount].name); return -1.0f;
+        case SR_ROOT:     snprintf(buf, len, "%s", kNoteNames[a.proj.root % 12]); return -1.0f;
+        case SR_CHORD:    snprintf(buf, len, "%s", kChordNames[a.chordMode % CH_COUNT]); return -1.0f;
+        case SR_ARP_MODE: snprintf(buf, len, "%s", kArpModeNames[a.proj.arpMode % ARP_MODE_COUNT]); return -1.0f;
+        case SR_ARP_RATE: snprintf(buf, len, "%s", kArpRateNames[a.proj.arpRate % 6]); return -1.0f;
+        case SR_ARP_OCT:  snprintf(buf, len, "%d", a.proj.arpOct);      return a.proj.arpOct / 4.0f;
+        case SR_ARP_GATE: snprintf(buf, len, "%d/16", a.proj.arpGate);  return a.proj.arpGate / 15.0f;
+        default: {
+            int L = patternLength(a.proj, a.engine.seq().currentPattern());
+            snprintf(buf, len, "%d", L);
+            return L / (float)kMaxSteps;
+        }
+    }
+}
 
 static void drawSys(App& a, int, int y0, int w, int h) {
     M5Canvas& g = uiCanvas();
     char buf[48];
-    textAt(g, 4, y0 + 1, "SYSTEM", C_ACCENT, &fonts::Font0);
-    textAt(g, w - 3, y0 + 1, "SYNTHCARD v1.0", C_FAINT, &fonts::Font0, textdatum_t::top_right);
+    textAt(g, 4, y0 + 1, "SETTINGS", C_ACCENT, &fonts::Font0);
+    textAt(g, w - 3, y0 + 1, "SYNTHCARD v1.1", C_FAINT, &fonts::Font0, textdatum_t::top_right);
     g.drawFastHLine(0, y0 + 11, w, C_GRID);
 
-    for (int i = 0; i < kSysRowCount; ++i) {
-        int y = y0 + 16 + i * 14;
-        bool sel = i == a.sysCursor;
-        if (sel) g.fillRect(2, y - 2, 140, 13, C_PANEL2);
-        textAt(g, 6, y, kSysRows[i], sel ? C_ACCENT : C_DIM, &fonts::Font0);
-        float frac = 0.0f;
-        switch (i) {
-            case 0: snprintf(buf, sizeof(buf), "%d", audioGetVolume()); frac = audioGetVolume() / 255.0f; break;
-            case 1: snprintf(buf, sizeof(buf), "%d", a.settings.brightness); frac = a.settings.brightness / 255.0f; break;
-            case 2: snprintf(buf, sizeof(buf), "%d%%", a.proj.swing); frac = a.proj.swing / 100.0f; break;
-            case 3: snprintf(buf, sizeof(buf), "%s", kScales[a.proj.scale % kScaleCount].name); break;
-            case 4: snprintf(buf, sizeof(buf), "%s", kNoteNames[a.proj.root % 12]); break;
-            default: snprintf(buf, sizeof(buf), "%s", kChordNames[a.chordMode % CH_COUNT]); break;
-        }
+    int first = 0;
+    if (a.sysCursor >= kSysVisible) first = a.sysCursor - kSysVisible + 1;
+    if (first > SR_COUNT - kSysVisible) first = SR_COUNT - kSysVisible;
+
+    for (int i = 0; i < kSysVisible; ++i) {
+        const int row = first + i;
+        if (row >= SR_COUNT) break;
+        const int y = y0 + 15 + i * 13;
+        const bool sel = row == a.sysCursor;
+        if (sel) g.fillRect(2, y - 2, 140, 12, C_PANEL2);
+        textAt(g, 6, y, kSysRows[row], sel ? C_ACCENT : C_DIM, &fonts::Font0);
+        float frac = sysValue(a, row, buf, sizeof(buf));
         textAt(g, 138, y, buf, C_TEXT, &fonts::Font0, textdatum_t::top_right);
-        if (frac > 0.0f) bar(g, 6, y + 9, 132, 2, frac, sel ? C_ACCENT : C_ACC2, C_FAINT);
+        if (frac >= 0.0f) bar(g, 6, y + 9, 132, 2, frac, sel ? C_ACCENT : C_ACC2, C_FAINT);
+    }
+    // scroll indicator
+    if (SR_COUNT > kSysVisible) {
+        const int trackH = kSysVisible * 13;
+        const int thumb = trackH * kSysVisible / SR_COUNT;
+        const int off = trackH * first / SR_COUNT;
+        g.fillRect(144, y0 + 13, 2, trackH, C_FAINT);
+        g.fillRect(144, y0 + 13 + off, 2, thumb, C_ACCENT);
     }
 
-    const int ix = 150;
-    textAt(g, ix, y0 + 16, "STATUS", C_FAINT, &fonts::Font0);
+    const int ix = 152;
+    textAt(g, ix, y0 + 15, "STATUS", C_FAINT, &fonts::Font0);
     snprintf(buf, sizeof(buf), "CPU  %d%%", (int)(a.engine.cpuLoad() * 100));
-    textAt(g, ix, y0 + 28, buf, C_TEXT, &fonts::Font0);
+    textAt(g, ix, y0 + 27, buf, C_TEXT, &fonts::Font0);
     snprintf(buf, sizeof(buf), "VOX  %d/%d", a.engine.activeVoices(), a.engine.maxVoices());
-    textAt(g, ix, y0 + 39, buf, C_TEXT, &fonts::Font0);
+    textAt(g, ix, y0 + 38, buf, C_TEXT, &fonts::Font0);
     snprintf(buf, sizeof(buf), "RAM  %dk", (int)(ESP.getFreeHeap() / 1024));
-    textAt(g, ix, y0 + 50, buf, C_TEXT, &fonts::Font0);
+    textAt(g, ix, y0 + 49, buf, C_TEXT, &fonts::Font0);
     snprintf(buf, sizeof(buf), "FPS  %d", (int)a.fps);
-    textAt(g, ix, y0 + 61, buf, C_TEXT, &fonts::Font0);
+    textAt(g, ix, y0 + 60, buf, C_TEXT, &fonts::Font0);
     snprintf(buf, sizeof(buf), "BAT  %d%%", M5.Power.getBatteryLevel());
-    textAt(g, ix, y0 + 72, buf, C_TEXT, &fonts::Font0);
+    textAt(g, ix, y0 + 71, buf, C_TEXT, &fonts::Font0);
 }
 
 static bool actSys(App& a, const Action& act) {
     switch (act.act) {
-        case A_UP:   case A_CURSOR_PREV: a.sysCursor = (uint8_t)((a.sysCursor + kSysRowCount - 1) % kSysRowCount); return true;
-        case A_DOWN: case A_CURSOR_NEXT: a.sysCursor = (uint8_t)((a.sysCursor + 1) % kSysRowCount); return true;
+        case A_UP: case A_CURSOR_PREV:
+            a.sysCursor = (uint8_t)((a.sysCursor + SR_COUNT - 1) % SR_COUNT); return true;
+        case A_DOWN: case A_CURSOR_NEXT:
+            a.sysCursor = (uint8_t)((a.sysCursor + 1) % SR_COUNT); return true;
         case A_VALUE_DOWN: case A_VALUE_UP: {
-            int d = (act.act == A_VALUE_UP) ? 1 : -1;
-            int big = act.arg > 1 ? 10 : 1;
+            const int d = (act.act == A_VALUE_UP) ? 1 : -1;
+            const int big = act.arg > 1 ? 10 : 1;
             char v[24];
             switch (a.sysCursor) {
-                case 0: {
+                case SR_VOLUME: {
                     int nv = clampi(audioGetVolume() + d * big * 8, 0, 255);
                     audioSetVolume((uint8_t)nv);
                     a.settings.volume = (uint8_t)nv;
                     settingsSave(a.settings);
-                    snprintf(v, sizeof(v), "%d", nv);
-                    showParam(a, "VOLUME", v, nv / 255.0f);
                     break;
                 }
-                case 1: {
+                case SR_BRIGHT: {
                     int nv = clampi(a.settings.brightness + d * big * 8, 10, 255);
                     a.settings.brightness = (uint8_t)nv;
                     M5.Display.setBrightness((uint8_t)nv);
                     settingsSave(a.settings);
-                    snprintf(v, sizeof(v), "%d", nv);
-                    showParam(a, "BRIGHTNESS", v, nv / 255.0f);
                     break;
                 }
-                case 2:
-                    a.proj.swing = (uint8_t)clampi(a.proj.swing + d * big * 2, 0, 100);
-                    snprintf(v, sizeof(v), "%d%%", a.proj.swing);
-                    showParam(a, "SWING", v, a.proj.swing / 100.0f);
+                case SR_METRO:
+                    a.settings.metronome = (uint8_t)((a.settings.metronome + METRO_COUNT + d) % METRO_COUNT);
+                    a.engine.setMetronome(a.settings.metronome);
+                    settingsSave(a.settings);
                     break;
-                case 3:
-                    a.proj.scale = (uint8_t)((a.proj.scale + kScaleCount + d) % kScaleCount);
-                    showParam(a, "SCALE", kScales[a.proj.scale].name, -1.0f);
+                case SR_SWING:
+                    a.proj.swing = (uint8_t)clampi(a.proj.swing + d * big * 2, 0, 100); break;
+                case SR_SCALE:
+                    a.proj.scale = (uint8_t)((a.proj.scale + kScaleCount + d) % kScaleCount); break;
+                case SR_ROOT:
+                    a.proj.root = (uint8_t)((a.proj.root + 12 + d) % 12); break;
+                case SR_CHORD:
+                    a.chordMode = (uint8_t)((a.chordMode + CH_COUNT + d) % CH_COUNT); break;
+                case SR_ARP_MODE:
+                    a.proj.arpMode = (uint8_t)((a.proj.arpMode + ARP_MODE_COUNT + d) % ARP_MODE_COUNT); break;
+                case SR_ARP_RATE:
+                    a.proj.arpRate = (uint8_t)((a.proj.arpRate + 6 + d) % 6); break;
+                case SR_ARP_OCT:
+                    a.proj.arpOct = (uint8_t)clampi(a.proj.arpOct + d, 1, 4); break;
+                case SR_ARP_GATE:
+                    a.proj.arpGate = (uint8_t)clampi(a.proj.arpGate + d, 1, 15); break;
+                default: {
+                    Pattern& p = a.proj.pat[a.engine.seq().currentPattern()];
+                    p.length = (uint8_t)clampi(p.length + d * big, 1, kMaxSteps);
                     break;
-                case 4:
-                    a.proj.root = (uint8_t)((a.proj.root + 12 + d) % 12);
-                    showParam(a, "ROOT", kNoteNames[a.proj.root], -1.0f);
-                    break;
-                default:
-                    a.chordMode = (uint8_t)((a.chordMode + CH_COUNT + d) % CH_COUNT);
-                    showParam(a, "CHORD", kChordNames[a.chordMode], -1.0f);
-                    break;
+                }
             }
+            float frac = sysValue(a, a.sysCursor, v, sizeof(v));
+            showParam(a, kSysRows[a.sysCursor], v, frac);
             return true;
         }
         default: return false;

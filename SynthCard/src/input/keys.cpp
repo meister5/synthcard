@@ -83,6 +83,9 @@ Action mapAction(uint8_t id, const Mods& m) {
     const uint8_t r = id / 14, c = id % 14;
     Action a;
 
+    // CTRL is otherwise unused, which leaves the familiar undo chord free.
+    if (m.ctrl && r == 3 && c == 3) { a.act = A_UNDO; return a; }
+
     if (r == 3 && c == 13) { a.act = m.fn ? A_TAP_TEMPO : A_PLAY_STOP; return a; }
     if (r == 1 && c == 0)  { a.act = m.fn ? A_MODE_PREV : A_MODE_NEXT; return a; }
     if (r == 0 && c == 0)  { a.act = m.fn ? A_MENU : A_HELP; return a; }
@@ -111,8 +114,15 @@ Action mapAction(uint8_t id, const Mods& m) {
         }
         a.act = A_STEP; a.arg = (int8_t)(c + 7); return a;      // 8..15
     }
-    if (r == 1 && c == 9)  { a.act = m.fn ? A_SAVE : A_CURSOR_PREV; return a; }
-    if (r == 1 && c == 10) { a.act = m.fn ? A_LOAD : A_CURSOR_NEXT; return a; }
+    // SHIFT is the pattern layer everywhere, so it also sizes the pattern.
+    if (r == 1 && c == 9)  {
+        if (m.shift) { a.act = A_PATLEN_DOWN; return a; }
+        a.act = m.fn ? A_SAVE : A_CURSOR_PREV; return a;
+    }
+    if (r == 1 && c == 10) {
+        if (m.shift) { a.act = A_PATLEN_UP; return a; }
+        a.act = m.fn ? A_LOAD : A_CURSOR_NEXT; return a;
+    }
     if (r == 1 && c == 11) {
         if (m.shift) { a.act = A_PATTERN_STEP; a.arg = -1; return a; }
         a.act = A_VALUE_DOWN; a.arg = m.fn ? 10 : 1; return a;

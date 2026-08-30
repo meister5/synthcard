@@ -82,7 +82,9 @@ Full reference in [CONTROLS.md](CONTROLS.md), and on the device under
 - `1`–`8` and `Q`–`I` = steps 1–16
 - `O` / `P` select a parameter, `[` / `]` change it
 - `FN` + arrows (`; . , /`) navigate; `FN`+`1`…`8` jumps between modes
-- `SHIFT` is the pattern layer: `SHIFT`+`1`…`8` jumps, `SHIFT`+`[`/`]` steps
+- `SHIFT` is the pattern layer: `SHIFT`+`1`…`8` jumps, `SHIFT`+`[`/`]` steps,
+  `SHIFT`+`O`/`P` sets pattern length
+- `CTRL`+`Z` undoes (press again to redo)
 - `FN`+`Q`/`W`/`E`/`R` generate a beat, bassline, melody or sound
 
 ## Modes
@@ -96,7 +98,7 @@ Full reference in [CONTROLS.md](CONTROLS.md), and on the device under
 | 5 | **FX** | Delay, reverb, chorus, drive, master level. |
 | 6 | **SONG** | Chain up to 64 pattern slots with repeat counts. |
 | 7 | **FILE** | Name, save, load and delete projects on the SD card. |
-| 8 | **SYS** | Volume, brightness, swing, scale, root, chord mode, and live CPU / RAM / FPS / battery. |
+| 8 | **SYS** | Scrolling settings: volume, brightness, metronome, swing, scale, root, chord mode, arpeggiator rate / octaves / gate, pattern length — plus live CPU / RAM / FPS / battery. |
 
 ## The instrument
 
@@ -121,7 +123,8 @@ clap, tom, rim, crash, perc), each with tune, decay, tone and level, in seven
 kits: 808, 909, ELECTRO, MINIMAL, INDUSTRIAL, LOFI, EXPERIMENT. No samples, so
 nothing to load off the card.
 
-**Sequencer** — Eight patterns, 1–64 steps each, three tracks per pattern
+**Sequencer** — Eight patterns, 1–64 steps each (resizable live from any
+screen), three tracks per pattern
 (LEAD, BASS, and the nine drum lanes). Per-step note, velocity, gate length,
 probability, slide and mute. Gates run from a sixteenth of a step up to
 seventeen whole steps, so notes can sustain across the bar. Global swing,
@@ -132,7 +135,9 @@ chain into a 64-slot song with repeats.
 running pattern and keep looping. **How long you hold a key is recorded**, so a
 sustained note plays back sustained. Hold `BKSP` while the loop passes to rub
 notes out again. Switch tracks and keep layering. Nothing is destructive —
-every recorded step is editable afterwards on the SEQ page.
+every recorded step is editable afterwards on the SEQ page, and `CTRL`+`Z`
+undoes a whole take. A metronome (off / always / while recording only) gives
+you something to play to when the pattern is still empty.
 
 **Performance** — Ten scales (chromatic, major, minor, both pentatonics, blues,
 dorian, mixolydian, harmonic minor, phrygian) that constrain the keyboard to

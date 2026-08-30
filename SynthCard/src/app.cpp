@@ -56,6 +56,13 @@ void refreshFileList(App& app) {
     if (app.fileCount == 0) showToast(app, "NO PROJECTS ON CARD", true);
 }
 
+// Call before anything that throws work away. Cheap enough (one 9 KB copy) to
+// sit in front of every destructive action.
+void snapshotUndo(App& app) {
+    app.undoBuf = app.proj;
+    app.undoValid = true;
+}
+
 // ===========================================================================
 // live keyboard
 // ===========================================================================
@@ -206,6 +213,7 @@ static bool handleGlobal(App& app, const Action& act) {
     switch (act.act) {
         case A_PLAY_STOP: app.engine.post(EV_TOGGLE); return true;
         case A_RECORD:
+            if (!s.recording()) snapshotUndo(app);     // so a whole take can be undone
             app.engine.post(EV_REC, s.recording() ? 0 : 1);
             if (!s.playing()) app.engine.post(EV_PLAY);
             showToast(app, s.recording() ? "REC OFF" : "REC ON");
@@ -235,6 +243,18 @@ static bool handleGlobal(App& app, const Action& act) {
             showToast(app, m);
             return true;
         }
+        case A_UNDO:
+            if (!app.undoValid) { showToast(app, "NOTHING TO UNDO", true); return true; }
+            app.engine.requestUndo();
+            showToast(app, "UNDO");
+            return true;
+        case A_PATLEN_DOWN: case A_PATLEN_UP: {
+            Pattern& pp = app.proj.pat[s.currentPattern()];
+            pp.length = (uint8_t)clampi(pp.length + (act.act == A_PATLEN_UP ? 1 : -1), 1, kMaxSteps);
+            char v[16]; snprintf(v, sizeof(v), "%d", pp.length);
+            showParam(app, "PATTERN LEN", v, pp.length / (float)kMaxSteps);
+            return true;
+        }
         case A_PATTERN_STEP: {
             // Step relative to whatever is already queued, so two taps move two.
             int base = (s.queuedPattern() != 0xFF) ? s.queuedPattern() : s.currentPattern();
@@ -259,20 +279,24 @@ static bool handleGlobal(App& app, const Action& act) {
             showParam(app, "ARP MODE", kArpModeNames[app.proj.arpMode], -1.0f);
             return true;
         case A_RND_DRUMS:
+            snapshotUndo(app);
             randomDrums(app.proj.pat[s.currentPattern()], app.rng, 65);
             showToast(app, "RANDOM BEAT");
             return true;
         case A_RND_BASS:
+            snapshotUndo(app);
             randomBass(app.proj.pat[s.currentPattern()], 1, app.rng, app.proj.root,
                        app.proj.scale ? app.proj.scale : 4, (uint8_t)clampi(app.proj.octave - 1, 1, 7));
             showToast(app, "RANDOM BASS");
             return true;
         case A_RND_MELODY:
+            snapshotUndo(app);
             randomMelody(app.proj.pat[s.currentPattern()], 0, app.rng, app.proj.root,
                          app.proj.scale ? app.proj.scale : 4, app.proj.octave);
             showToast(app, "RANDOM LEAD");
             return true;
         case A_RND_SOUND:
+            snapshotUndo(app);
             randomizePatch(app.proj.patch[app.engine.liveTrack()], app.rng, 45);
             showToast(app, "RANDOM SOUND");
             return true;
@@ -283,10 +307,12 @@ static bool handleGlobal(App& app, const Action& act) {
             return true;
         case A_PASTE:
             if (!app.clipboardValid) { showToast(app, "CLIPBOARD EMPTY", true); return true; }
+            snapshotUndo(app);
             app.proj.pat[s.currentPattern()] = app.clipboard;
             showToast(app, "PATTERN PASTED");
             return true;
         case A_CLEAR_PATTERN: {
+            snapshotUndo(app);
             char keep[9];
             memcpy(keep, app.proj.pat[s.currentPattern()].name, sizeof(keep));
             app.proj.pat[s.currentPattern()].clear();
@@ -316,6 +342,7 @@ static void handleFallback(App& app, const Action& act) {
             break;
         }
         case A_CLEAR_TRACK:
+            snapshotUndo(app);
             app.proj.pat[app.engine.seq().currentPattern()].clearTrack(app.engine.liveTrack());
             showToast(app, "TRACK CLEARED");
             break;
@@ -432,7 +459,7 @@ static void handleKey(App& app, const KeyEvent& e) {
 
     // Musical keys (unless the command layer is active).
     int8_t semi = keyToSemitone(e.id);
-    if (semi >= 0 && !m.fn && app.mode != M_FILE) {
+    if (semi >= 0 && !m.fn && !m.ctrl && app.mode != M_FILE) {
         if (e.pressed) noteKeyDown(app, e.id, semi, m);
         else           noteKeyUp(app, e.id);
         return;
@@ -478,6 +505,8 @@ void appSetup() {
     a.proj.reset();
     a.keys.begin();
     a.engine.begin(&a.proj);
+    a.engine.setUndoBuffer(&a.undoBuf);
+    a.engine.setMetronome(a.settings.metronome);
     audioSetVolume(a.settings.volume);
     if (!audioStart(&a.engine)) {
         showToast(a, "AUDIO INIT FAILED", true);
