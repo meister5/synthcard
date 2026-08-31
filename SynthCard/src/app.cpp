@@ -474,6 +474,7 @@ void appSetup() {
     a.engine.begin(&a.proj);
     a.engine.setUndoBuffer(&a.undoBuf);
     a.engine.setMetronome(a.settings.metronome);
+    a.engine.setOutMode(a.settings.outMode);
     a.engine.setRecordChord(a.chordMode);
     audioSetVolume(a.settings.volume);
     if (!audioStart(&a.engine)) {

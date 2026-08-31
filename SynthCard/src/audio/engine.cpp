@@ -24,7 +24,7 @@ bool AudioEngine::begin(Project* proj) {
     drums_.init();
     drums_.setKit(&proj_->kit);
     fx_.init();
-    fx_.applySettings(proj_->fx);
+    fx_.applySettings(proj_->fx, proj_->bpm, outMode_);
     seq_.init(proj_, this);
     arp_.init(this);
     qHead_ = qTail_ = 0;
@@ -206,7 +206,9 @@ void AudioEngine::renderBlock(int16_t* out, int n) {
 
     // Control-rate refresh: cheap enough to just do every block, which means
     // BPM / patch / FX edits from the UI take effect within 4 ms.
-    fx_.applySettings(proj_->fx);
+    // Re-applied every block, so a tempo change retunes a synced delay and
+    // an output-mode change takes effect within four milliseconds.
+    fx_.applySettings(proj_->fx, proj_->bpm, outMode_);
     seq_.refreshTiming();
     arp_.configure(proj_->arpMode, proj_->arpRate, proj_->arpOct, proj_->arpGate, proj_->bpm);
     if ((proj_->arpOn != 0) != arp_.enabled()) arp_.setEnabled(proj_->arpOn != 0);

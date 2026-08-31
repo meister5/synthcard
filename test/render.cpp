@@ -322,12 +322,59 @@ static void renderDemo() {
            wav::peak(out), wav::dcOffset(out));
 }
 
+// The reverb's impulse response, so the tail can be heard and its density
+// measured. A four-comb Schroeder produces a visibly periodic echo train; a
+// diffused plate should not.
+static void renderReverb() {
+    printf("\n=== REVERB ===\n");
+    for (int size : {30, 70, 120}) {
+        FxSettings fx;
+        fx.reset();
+        fx.set(FX_REV_SIZE, size);
+        fx.set(FX_REV_MIX, 127);
+        fx.set(FX_REV_DAMP, 40);
+        fx.set(FX_DLY_MIX, 0);
+        fx.set(FX_COMP, 0);
+        Effects e;
+        e.init();
+        e.applySettings(fx, 120, OUT_LINE);
+
+        std::vector<float> out;
+        float mix[kBlockSize], sd[kBlockSize], sr[kBlockSize];
+        for (int b = 0; b < 1200; ++b) {                // 4.8 s
+            memset(mix, 0, sizeof(mix));
+            memset(sd, 0, sizeof(sd));
+            memset(sr, 0, sizeof(sr));
+            if (b == 0) { sr[0] = 1.0f; }               // one impulse into the send
+            e.process(mix, sd, sr, kBlockSize);
+            for (int i = 0; i < kBlockSize; ++i) out.push_back(mix[i]);
+        }
+        // Echo density: how many times the tail crosses zero per second. A
+        // sparse comb network gives a low number and an audibly periodic
+        // tail; a diffused plate gives a high one.
+        // Measured over a fixed early window, so the figure does not shrink
+        // simply because a longer tail leaves more silence at the end.
+        const size_t w0 = 3200, w1 = 3200 + (size_t)(0.4f * kSampleRate);
+        int crossings = 0;
+        for (size_t i = w0 + 1; i < w1 && i < out.size(); ++i)
+            if ((out[i] >= 0.0f) != (out[i - 1] >= 0.0f)) ++crossings;
+        const float secs = 0.4f;
+        printf("  size %3d: peak %.3f  RT60 %.2f s  %.0f zero-crossings/s\n",
+               size, wav::peak(out), wav::decay60Ms(out, kSampleRate) / 1000.0f,
+               crossings / secs);
+        char path[128];
+        snprintf(path, sizeof(path), "%s/reverb-size%03d.wav", kOutDir, size);
+        wav::write(path, out, (int)kSampleRate);
+    }
+}
+
 int main() {
     mkdir(kOutDir, 0755);
     printf("SynthCard renderer -> %s/\n", kOutDir);
     renderKits();
     reportKickAudibility();
     renderChoke();
+    renderReverb();
     renderEngines();
     renderPresets();
     renderDemo();

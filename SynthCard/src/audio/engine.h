@@ -49,6 +49,8 @@ public:
     void requestUndo()                                    { post(EV_UNDO); }
     void drumHit(uint8_t lane, uint8_t vel)               { post(EV_DRUM, lane, vel); }
     void panic()                                          { post(EV_PANIC); }
+    void setOutMode(uint8_t m) { outMode_ = m < OUT_MODE_COUNT ? m : 0; }
+    uint8_t outMode() const { return outMode_; }
     void setLiveTrack(uint8_t t) { liveTrack_ = t < kMelTracks ? t : 0; }
     uint8_t liveTrack() const { return liveTrack_; }
     // Pause/resume the render task around flash or SD access.
@@ -107,6 +109,7 @@ private:
 
     uint32_t ageCounter_ = 0;
     uint8_t  liveTrack_ = 0;
+    uint8_t  outMode_ = OUT_SPEAKER;
     int      activeVoices_ = 0, maxVoices_ = kMaxVoices;
     float    cpuLoad_ = 0.0f;
     uint32_t underruns_ = 0;

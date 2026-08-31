@@ -17,6 +17,8 @@ struct Settings {
     uint8_t volume     = 190;
     uint8_t brightness = 80;
     uint8_t metronome  = 0;      // MetroMode
+    uint8_t outMode    = 0;      // OutMode: SPEAKER conditions the master bus
+    uint8_t tourDone   = 0;      // the first-run walkthrough has been seen
     char    lastProject[kNameLen] = {0};
 };
 

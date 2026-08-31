@@ -581,14 +581,14 @@ static void drawFx(App& a, int, int y0, int w, int h) {
     g.drawFastHLine(0, y0 + 11, w, C_GRID);
 
     for (int i = 0; i < FX_COUNT; ++i) {
-        int col = i / 6, row = i % 6;
-        int x = 6 + col * 118, y = y0 + 15 + row * 15;
+        int col = i / 8, row = i % 8;
+        int x = 6 + col * 118, y = y0 + 13 + row * 12;
         formatFx(a.proj.fx, (uint8_t)i, buf, sizeof(buf));
         bool sel = i == a.fxCursor;
-        if (sel) g.fillRect(x - 4, y - 1, 112, 13, C_PANEL2);
+        if (sel) g.fillRect(x - 4, y - 1, 112, 11, C_PANEL2);
         textAt(g, x, y, kFxInfo[i].name, sel ? C_ACCENT : C_DIM, &fonts::Font0);
         textAt(g, x + 104, y, buf, C_TEXT, &fonts::Font0, textdatum_t::top_right);
-        bar(g, x, y + 9, 104, 2, a.proj.fx.norm((uint8_t)i), sel ? C_ACCENT : C_ACC2, C_FAINT);
+        bar(g, x, y + 8, 104, 2, a.proj.fx.norm((uint8_t)i), sel ? C_ACCENT : C_ACC2, C_FAINT);
     }
 }
 
@@ -598,8 +598,8 @@ static bool actFx(App& a, const Action& act) {
             a.fxCursor = (uint8_t)((a.fxCursor + FX_COUNT - 1) % FX_COUNT); return true;
         case A_CURSOR_NEXT: case A_DOWN:
             a.fxCursor = (uint8_t)((a.fxCursor + 1) % FX_COUNT); return true;
-        case A_LEFT:  a.fxCursor = (uint8_t)((a.fxCursor + FX_COUNT - 6) % FX_COUNT); return true;
-        case A_RIGHT: a.fxCursor = (uint8_t)((a.fxCursor + 6) % FX_COUNT); return true;
+        case A_LEFT:  a.fxCursor = (uint8_t)((a.fxCursor + FX_COUNT - 8) % FX_COUNT); return true;
+        case A_RIGHT: a.fxCursor = (uint8_t)((a.fxCursor + 8) % FX_COUNT); return true;
         case A_VALUE_DOWN: case A_VALUE_UP: {
             int d = (act.act == A_VALUE_UP ? 1 : -1) * (act.arg > 1 ? 12 : 3);
             a.proj.fx.set(a.fxCursor, a.proj.fx.p[a.fxCursor] + d);
@@ -802,11 +802,11 @@ static bool actFile(App& a, const Action& act) {
 // SYS
 // ===========================================================================
 enum SysRow : uint8_t {
-    SR_VOLUME = 0, SR_BRIGHT, SR_METRO, SR_SWING, SR_SCALE, SR_ROOT, SR_CHORD,
+    SR_VOLUME = 0, SR_BRIGHT, SR_OUTPUT, SR_METRO, SR_SWING, SR_SCALE, SR_ROOT, SR_CHORD,
     SR_ARP_MODE, SR_ARP_RATE, SR_ARP_OCT, SR_ARP_GATE, SR_PAT_LEN, SR_COUNT
 };
 static const char* const kSysRows[SR_COUNT] = {
-    "VOLUME", "BRIGHTNESS", "METRONOME", "SWING", "SCALE", "ROOT", "CHORD",
+    "VOLUME", "BRIGHTNESS", "OUTPUT", "METRONOME", "SWING", "SCALE", "ROOT", "CHORD",
     "ARP MODE", "ARP RATE", "ARP OCT", "ARP GATE", "PATTERN LEN"
 };
 constexpr int kSysVisible = 7;
@@ -816,6 +816,7 @@ static float sysValue(App& a, int row, char* buf, int len) {
     switch (row) {
         case SR_VOLUME:   snprintf(buf, len, "%d", audioGetVolume());   return audioGetVolume() / 255.0f;
         case SR_BRIGHT:   snprintf(buf, len, "%d", a.settings.brightness); return a.settings.brightness / 255.0f;
+        case SR_OUTPUT:   snprintf(buf, len, "%s", kOutModeNames[a.settings.outMode % OUT_MODE_COUNT]); return -1.0f;
         case SR_METRO:    snprintf(buf, len, "%s", kMetroNames[a.settings.metronome % METRO_COUNT]); return -1.0f;
         case SR_SWING:    snprintf(buf, len, "%d%%", a.proj.swing);     return a.proj.swing / 100.0f;
         case SR_SCALE:    snprintf(buf, len, "%s", kScales[a.proj.scale % kScaleCount].name); return -1.0f;
@@ -903,6 +904,14 @@ static bool actSys(App& a, const Action& act) {
                     settingsSave(a.settings);
                     break;
                 }
+                case SR_OUTPUT:
+                    // SPEAKER high-passes the master so a kick's inaudible
+                    // bottom octave stops eating the limiter's headroom;
+                    // LINE leaves the signal alone for headphones.
+                    a.settings.outMode = (uint8_t)((a.settings.outMode + OUT_MODE_COUNT + d) % OUT_MODE_COUNT);
+                    a.engine.setOutMode(a.settings.outMode);
+                    settingsSave(a.settings);
+                    break;
                 case SR_METRO:
                     a.settings.metronome = (uint8_t)((a.settings.metronome + METRO_COUNT + d) % METRO_COUNT);
                     a.engine.setMetronome(a.settings.metronome);
