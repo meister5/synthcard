@@ -20,20 +20,30 @@ constexpr int kSongSlots    = 64;
 
 enum StepFlag : uint8_t { SF_MUTE = 0x01, SF_SLIDE = 0x02, SF_ACCENT = 0x04 };
 
+// Four bytes, not five. Gate needs five bits and chord needs two, so they
+// share a byte: 64 steps x 2 tracks x 8 patterns makes that 1 KB off a
+// project, and 2 KB once the undo buffer is counted.
 struct Step {
     uint8_t note;    // 0 = rest, otherwise MIDI note number
     uint8_t vel;     // 1..127
-    // 0..15  = (gate+1)/16 of one step, so 15 is exactly one step long.
-    // 16..31 = whole steps, (gate-14) of them, i.e. 16 = 2 steps ... 31 = 17.
+    uint8_t gc;      // gate in bits 0-4, ChordType in bits 5-6
+    uint8_t flags;   // SF_* in the low nibble, probability 0..8 in the high nibble
+
+    // gate: 0..15  = (gate+1)/16 of one step, so 15 is exactly one step long.
+    //       16..31 = whole steps, (gate-14) of them, i.e. 16 = 2 steps ... 31 = 17.
     // Live recording writes real held lengths into this, so a note you hold
     // plays back as long as you held it.
-    uint8_t gate;
-    uint8_t flags;   // SF_* in the low nibble, probability 0..8 in the high nibble
-    uint8_t chord;   // ChordType: the step's root is expanded in the song's key
+    inline uint8_t gate() const { return (uint8_t)(gc & 0x1F); }
+    inline void setGate(int g) { gc = (uint8_t)((gc & 0xE0) | (clampi(g, 0, 31) & 0x1F)); }
+    // chord: the step's root is expanded in the song's key at playback.
+    inline uint8_t chord() const { return (uint8_t)((gc >> 5) & 0x03); }
+    inline void setChord(int c) { gc = (uint8_t)((gc & 0x9F) | ((clampi(c, 0, 3) & 0x03) << 5)); }
+
     inline bool  on()   const { return note != 0 && !(flags & SF_MUTE); }
     inline uint8_t prob() const { return (uint8_t)(flags >> 4); }     // 0 = always
     inline void setProb(uint8_t p) { flags = (uint8_t)((flags & 0x0F) | ((p & 0x0F) << 4)); }
 };
+static_assert(sizeof(Step) == 4, "Step must stay four bytes");
 
 struct Pattern {
     char    name[9];

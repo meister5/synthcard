@@ -182,7 +182,7 @@ int main() {
 
     app.proj.reset();
     app.engine.begin(&app.proj);
-    app.engine.setUndoBuffer(&app.undoBuf);
+    app.engine.setUndoBuffer(&app.undoBuf.project);
     app.clipboard.clear();
     uiBegin();
 
@@ -233,8 +233,8 @@ int main() {
             randomBass(app.proj.pat[p], 1, rng, app.proj.root, scale, app.proj.octave);
             for (int t = 0; t < kMelTracks; ++t)
                 for (int s = 0; s < kMaxSteps; ++s) {
-                    app.proj.pat[p].mel[t][s].chord = (uint8_t)rng.below(CHORD_COUNT);
-                    app.proj.pat[p].mel[t][s].gate  = (uint8_t)rng.below(kGateMax + 1);
+                    app.proj.pat[p].mel[t][s].setChord(rng.below(CHORD_COUNT));
+                    app.proj.pat[p].mel[t][s].setGate(rng.below(kGateMax + 1));
                 }
         }
         drawEveryScreen("full");
@@ -248,8 +248,8 @@ int main() {
                 Step& st = app.proj.pat[p].mel[t][s];
                 st.note  = (uint8_t)(s & 1 ? 127 : 1);
                 st.vel   = 127;
-                st.gate  = kGateMax;
-                st.chord = CHORD_SEVENTH;
+                st.setGate(kGateMax);
+                st.setChord(CHORD_SEVENTH);
                 st.flags = 0xFF;
             }
     }

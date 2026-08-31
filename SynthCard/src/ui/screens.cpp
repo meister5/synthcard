@@ -332,7 +332,7 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
     for (int i = 0; i < len; ++i) {
         const Step& st0 = p.mel[tr][i];
         if (!st0.note) continue;
-        int vn = buildChord(st0.note, st0.chord, a.proj.root, a.proj.scale, voicing);
+        int vn = buildChord(st0.note, st0.chord(), a.proj.root, a.proj.scale, voicing);
         for (int k = 0; k < vn; ++k) {
             if (voicing[k] < lo) lo = voicing[k];
             if (voicing[k] > hi) hi = voicing[k];
@@ -355,10 +355,10 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
         if (stp.note) {
             // A note longer than one step draws across the steps it covers, and
             // a chord draws every tone it will actually voice.
-            const int gw = clampi((cellW * gateSixteenths(stp.gate)) / 16 - 1, 2, 16 * cellW - (cx - gx));
+            const int gw = clampi((cellW * gateSixteenths(stp.gate())) / 16 - 1, 2, 16 * cellW - (cx - gx));
             const int span = (hi - lo) ? (hi - lo) : 1;
             const uint16_t root = (stp.flags & SF_MUTE) ? C_FAINT : (stp.vel > 110 ? C_ACCENT : C_ACC2);
-            const int vn = buildChord(stp.note, stp.chord, a.proj.root, a.proj.scale, voicing);
+            const int vn = buildChord(stp.note, stp.chord(), a.proj.root, a.proj.scale, voicing);
             for (int k = vn - 1; k >= 0; --k) {
                 int ny = rollY + rollH - 3 - ((voicing[k] - lo) * (rollH - 6)) / span;
                 g.fillRect(cx + 1, ny, gw, 3, k == 0 ? root : C_FAINT);
@@ -384,8 +384,8 @@ static void drawSeq(App& a, int, int y0, int w, int h) {
     char v0[8], v1[8], v2[8], v3[8], v4[8];
     snprintf(v0, sizeof(v0), "%s", nn);
     snprintf(v1, sizeof(v1), "%d", sel.vel);
-    formatGate(sel.gate, v2, sizeof(v2));
-    snprintf(v3, sizeof(v3), "%s", kChordNames[sel.chord % CHORD_COUNT]);
+    formatGate(sel.gate(), v2, sizeof(v2));
+    snprintf(v3, sizeof(v3), "%s", kChordNames[sel.chord() % CHORD_COUNT]);
     snprintf(v4, sizeof(v4), "%s", sel.prob() ? (sel.prob() >= 8 ? "ALW" : "RND") : "ALW");
     const char* vals[kSeqFieldCount] = {v0, v1, v2, v3, v4};
     static_assert(sizeof(vals) / sizeof(vals[0]) == kSeqFieldCount,
@@ -418,7 +418,7 @@ static bool actSeq(App& a, const Action& act) {
         case A_CURSOR_NEXT: a.seqField = (uint8_t)((a.seqField + 1) % kSeqFieldCount); return true;
         case A_CONFIRM:
             if (s.note) s.flags ^= SF_MUTE;
-            else { s.note = liveBaseNote(a); s.vel = 100; s.gate = 8; }
+            else { s.note = liveBaseNote(a); s.vel = 100; s.setGate(8); }
             return true;
         case A_BACK: s.note = 0; s.flags = 0; return true;
         case A_MUTE: p.muteMel ^= (uint8_t)(1u << tr); return true;
@@ -445,17 +445,17 @@ static bool actSeq(App& a, const Action& act) {
                 case 2:
                     // 0..15 is a fraction of one step, 16..31 is 2..17 whole
                     // steps, so a note can be held across the bar.
-                    s.gate = (uint8_t)clampi(s.gate + dir * (big > 1 ? 4 : 1), 0, kGateMax);
-                    formatGate(s.gate, vl, sizeof(vl));
-                    showParam(a, "GATE", vl, s.gate / (float)kGateMax);
+                    s.setGate(s.gate() + dir * (big > 1 ? 4 : 1));
+                    formatGate(s.gate(), vl, sizeof(vl));
+                    showParam(a, "GATE", vl, s.gate() / (float)kGateMax);
                     break;
                 case 3: {
-                    s.chord = (uint8_t)((s.chord + CHORD_COUNT + dir) % CHORD_COUNT);
-                    showParam(a, "CHORD", kChordNames[s.chord], -1.0f);
+                    s.setChord((s.chord() + CHORD_COUNT + dir) % CHORD_COUNT);
+                    showParam(a, "CHORD", kChordNames[s.chord()], -1.0f);
                     // Audition the whole voicing, not just the root.
                     if (s.note) {
                         uint8_t ch[4];
-                        int cn = buildChord(s.note, s.chord, a.proj.root, a.proj.scale, ch);
+                        int cn = buildChord(s.note, s.chord(), a.proj.root, a.proj.scale, ch);
                         for (int k = 0; k < cn; ++k) {
                             a.engine.noteOn(tr, ch[k], s.vel);
                             a.engine.post(EV_NOTE_OFF, tr, ch[k]);

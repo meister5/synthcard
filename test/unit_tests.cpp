@@ -308,7 +308,7 @@ static void testSequencerTiming() {
     proj.swing = 0;
     Pattern& p = proj.pat[0];
     p.length = 16;
-    for (int i = 0; i < 16; ++i) { p.mel[0][i].note = 60; p.mel[0][i].vel = 100; p.mel[0][i].gate = 8; }
+    for (int i = 0; i < 16; ++i) { p.mel[0][i].note = 60; p.mel[0][i].vel = 100; p.mel[0][i].setGate(8); }
     for (int i = 0; i < 16; i += 4) p.drum[DL_KICK][i] = 100;
 
     CountingSink sink;
@@ -428,7 +428,7 @@ static void testGateLengths() {
     for (int i = 0; i < 8; ++i) proj.pat[0].mel[0][i].note = 0;
     proj.pat[0].mel[0][0].note = 60;
     proj.pat[0].mel[0][0].vel  = 100;
-    proj.pat[0].mel[0][0].gate = 16;       // 2 whole steps
+    proj.pat[0].mel[0][0].setGate(16);       // 2 whole steps
 
     CountingSink sink;
     Sequencer seq;
@@ -442,7 +442,7 @@ static void testGateLengths() {
         CHECK(abs(held - 8000) <= 128, "gate 16 held %d samples, expected 8000", held);
     }
     // A fractional gate must still be a fraction of one step.
-    proj.pat[0].mel[0][0].gate = 7;        // 8/16 of a step
+    proj.pat[0].mel[0][0].setGate(7);        // 8/16 of a step
     CountingSink s2;
     Sequencer q;
     q.init(&proj, &s2);
@@ -488,7 +488,7 @@ static void testRecordedLength() {
         for (int i = 0; i < 16; ++i) if (proj.pat[0].mel[0][i].note == 64) found = i;
         CHECK(found >= 0, "%s: nothing recorded", c.what);
         if (found < 0) continue;
-        uint8_t g = proj.pat[0].mel[0][found].gate;
+        uint8_t g = proj.pat[0].mel[0][found].gate();
         CHECK(g == c.wantGate, "%s: recorded gate %d, expected %d", c.what, g, c.wantGate);
     }
 
@@ -646,7 +646,7 @@ static void testChordPlayback() {
     proj.pat[0].length = 4;
     for (int i = 0; i < 4; ++i) proj.pat[0].mel[0][i].note = 0;
     Step& st = proj.pat[0].mel[0][0];
-    st.note = 60; st.vel = 100; st.gate = 7; st.chord = CHORD_TRIAD;
+    st.note = 60; st.vel = 100; st.setGate(7); st.setChord(CHORD_TRIAD);
 
     CountingSink sink;
     Sequencer seq;
@@ -855,7 +855,7 @@ static void testProjectFormat() {
         randomBass(a.pat[i], 1, rng, 0, 2, 3);
         for (int t = 0; t < kMelTracks; ++t)
             for (int st = 0; st < kMaxSteps; ++st)
-                a.pat[i].mel[t][st].chord = (uint8_t)((i + t + st) % CHORD_COUNT);
+                a.pat[i].mel[t][st].setChord((i + t + st) % CHORD_COUNT);
         a.pat[i].muteDrum = (uint16_t)(i * 3);
         a.pat[i].muteMel = (uint8_t)(i & 1);
     }
@@ -867,9 +867,17 @@ static void testProjectFormat() {
 
     int n = projectSerialize(a, buf, sizeof(buf));
     CHECK(n > 0, "serialize failed");
-    CHECK(n <= kProjectBufSize, "project needs %d bytes, buffer is %d", n, kProjectBufSize);
+    // Save and load stage through the undo buffer, so the format must fit
+    // inside one with room to spare. This has already been violated once by a
+    // change that shrank both sides equally and left the file's own header
+    // sticking out the end, so the margin is asserted rather than assumed.
+    CHECK(n <= kProjectBufSize, "project needs %d bytes, staging buffer is %d",
+          n, kProjectBufSize);
+    CHECK(kProjectBufSize - n >= 16,
+          "only %d bytes of headroom in the staging buffer", kProjectBufSize - n);
     if (n <= 0) return;
-    printf("  project size: %d bytes\n", n);
+    printf("  project size: %d bytes (staging buffer %d, headroom %d)\n",
+           n, kProjectBufSize, kProjectBufSize - n);
 
     Project b;
     b.reset();
@@ -957,8 +965,8 @@ static int writeV2Blob(const Project& p, const uint8_t oldPatch[kOldPatchCount],
         for (int t = 0; t < kMelTracks; ++t)
             for (int st = 0; st < kMaxSteps; ++st) {          // v2: 5 bytes
                 u8(pa.mel[t][st].note); u8(pa.mel[t][st].vel);
-                u8(pa.mel[t][st].gate); u8(pa.mel[t][st].flags);
-                u8(pa.mel[t][st].chord);
+                u8(pa.mel[t][st].gate()); u8(pa.mel[t][st].flags);
+                u8(pa.mel[t][st].chord());
             }
         // v2 wrote nine lanes in the old order; the reader has to put them
         // back where they belong now.

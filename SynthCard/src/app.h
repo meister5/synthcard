@@ -79,8 +79,9 @@ struct App {
 
     // Single-level undo. Holds a whole Project so it covers patterns, patches,
     // the kit and the FX in one shot; CTRL+Z swaps it with the live song, so a
-    // second press is a redo.
-    Project undoBuf;
+    // second press is a redo. It doubles as the save/load staging buffer,
+    // which is why it carries a small pad - see kProjectBufSize.
+    ProjectScratch undoBuf;
     bool    undoValid = false;
 
     uint32_t tapTimes[4] = {0};

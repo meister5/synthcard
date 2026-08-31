@@ -3,3 +3,8 @@ dist/
 test/unit_tests
 *.bin
 !/*.bin
+test/out/
+test/render
+test/bench
+test/gen_controls
+test/ui_tests

@@ -129,7 +129,9 @@ int projectSerialize(const Project& p, uint8_t* buf, int cap) {
                 // one byte. That is 1 KB off a project, which is what keeps
                 // the whole format inside a borrowed Project - see
                 // kProjectBufSize.
-                w.u8((uint8_t)((pa.mel[t][s].gate & 0x1F) | ((pa.mel[t][s].chord & 0x03) << 5)));
+                // The in-memory layout already packs these into one byte; the file has
+                // carried them that way since v3, so this is a straight copy.
+                w.u8(pa.mel[t][s].gc);
                 w.u8(pa.mel[t][s].flags);
             }
         for (int l = 0; l < DL_COUNT; ++l) w.bytes(pa.drum[l], kMaxSteps);
@@ -185,13 +187,12 @@ bool projectDeserialize(Project& p, const uint8_t* buf, int len) {
                 st.note = r.u8(); st.vel = r.u8();
                 if (ver >= 3) {
                     const uint8_t gc = r.u8();
-                    st.gate  = (uint8_t)(gc & 0x1F);
-                    st.chord = (uint8_t)((gc >> 5) & 0x03);
+                    st.gc    = gc;
                     st.flags = r.u8();
                 } else {
-                    st.gate  = r.u8();
+                    st.setGate(r.u8());
                     st.flags = r.u8();
-                    st.chord = (ver >= 2) ? r.u8() : (uint8_t)CHORD_OFF;
+                    st.setChord((ver >= 2) ? r.u8() : (uint8_t)CHORD_OFF);
                 }
             }
         for (int l = 0; l < nDrum; ++l) {
@@ -289,8 +290,8 @@ bool projectDeserialize(Project& p, const uint8_t* buf, int len) {
                 Step& st = p.pat[i].mel[t][s2];
                 if (st.note > 127) st.note = 0;
                 if (st.vel > 127) st.vel = 100;
-                if (st.gate > kGateMax) st.gate = 8;
-                if (st.chord >= CHORD_COUNT) st.chord = CHORD_OFF;
+                if (st.gate() > kGateMax) st.setGate(8);
+                if (st.chord() >= CHORD_COUNT) st.setChord(CHORD_OFF);
             }
     for (int i = 0; i < kPatternCount; ++i)
         for (int j = 0; j < kSongSlots; ++j)

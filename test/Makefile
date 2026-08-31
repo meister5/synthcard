@@ -3,6 +3,12 @@ SRC_DIR := ../SynthCard/src
 CXX     ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR)
 
+# Headers are dependencies too. Without this a change to sequencer.h - which is
+# where the step layout lives - rebuilds nothing at all, and the suite happily
+# reports a pass for code that was never recompiled.
+HEADERS := $(wildcard $(SRC_DIR)/*.h) $(wildcard $(SRC_DIR)/*/*.h) \
+           $(wildcard stub/*.h) $(wildcard stub/*/*.h) $(wildcard *.h)
+
 # Everything that builds without Arduino. One list, used by every target, so a
 # new engine or drum family cannot be added to the firmware and forgotten here.
 CORE := $(SRC_DIR)/audio/dsp.cpp \
@@ -28,7 +34,7 @@ CORE := $(SRC_DIR)/audio/dsp.cpp \
 
 SOURCES := unit_tests.cpp $(CORE)
 
-unit_tests: $(SOURCES)
+unit_tests: $(SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES)
 
 test: unit_tests
@@ -57,7 +63,7 @@ UIFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-narrowing 
            -fsanitize=address,undefined -fno-omit-frame-pointer \
            -I$(SRC_DIR) -Istub
 
-ui_tests: $(UI_SOURCES)
+ui_tests: $(UI_SOURCES) $(HEADERS)
 	$(CXX) $(UIFLAGS) -o $@ $(UI_SOURCES)
 
 ui-test: ui_tests
@@ -74,7 +80,7 @@ all-tests: test ui-test
 # listened to somewhere with speakers.
 RENDER_SOURCES := render.cpp $(CORE)
 
-render: $(RENDER_SOURCES)
+render: $(RENDER_SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) -O2 -o $@ $(RENDER_SOURCES)
 
 render-wav: render
@@ -88,7 +94,7 @@ render-wav: render
 # engines, and the change in them between commits, are the point.
 BENCH_SOURCES := bench.cpp $(CORE)
 
-bench: $(BENCH_SOURCES)
+bench: $(BENCH_SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) -O2 -o $@ $(BENCH_SOURCES)
 
 bench-run: bench
@@ -101,7 +107,7 @@ bench-run: bench
 # describe a binding that does not exist or miss one that does.
 CONTROLS_SOURCES := gen_controls.cpp $(SRC_DIR)/input/keys.cpp $(CORE)
 
-gen_controls: $(CONTROLS_SOURCES)
+gen_controls: $(CONTROLS_SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) -Wno-narrowing -Istub -o $@ $(CONTROLS_SOURCES) host_stubs.cpp \
 	    $(SRC_DIR)/ui/ui.cpp $(SRC_DIR)/ui/screens.cpp $(SRC_DIR)/ui/legend.cpp \
 	    $(SRC_DIR)/ui/tour.cpp $(SRC_DIR)/app.cpp $(SRC_DIR)/audio/engine.cpp

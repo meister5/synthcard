@@ -59,7 +59,7 @@ void refreshFileList(App& app) {
 // Call before anything that throws work away. Cheap enough (one 9 KB copy) to
 // sit in front of every destructive action.
 void snapshotUndo(App& app) {
-    app.undoBuf = app.proj;
+    app.undoBuf.project = app.proj;
     app.undoValid = true;
 }
 
@@ -104,7 +104,7 @@ static void noteKeyDown(App& app, uint8_t id, int8_t semi, const Mods& m) {
         Step& s = p.mel[app.seqTrack % kMelTracks][st];
         s.note = (uint8_t)n;
         s.vel = vel;
-        if (s.gate == 0) s.gate = 8;
+        if (s.gate() == 0) s.setGate(8);
         s.flags = (uint8_t)(s.flags & 0xF0);
         app.seqStep = (uint8_t)((app.seqStep + 1) % 16);
     }
@@ -485,7 +485,7 @@ void appSetup() {
     a.proj.reset();
     a.keys.begin();
     a.engine.begin(&a.proj);
-    a.engine.setUndoBuffer(&a.undoBuf);
+    a.engine.setUndoBuffer(&a.undoBuf.project);
     a.engine.setMetronome(a.settings.metronome);
     a.engine.setOutMode(a.settings.outMode);
     a.engine.setRecordChord(a.chordMode);

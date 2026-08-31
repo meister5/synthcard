@@ -47,9 +47,18 @@ constexpr uint16_t kProjectVersion = 3;
 int  projectSerialize(const Project& p, uint8_t* buf, int cap);
 bool projectDeserialize(Project& p, const uint8_t* buf, int len);
 
-// The staging buffer is a borrowed Project, so the format must always fit
-// inside one. unit_tests.cpp asserts a fully populated project serialises
-// within this, which is what makes the borrow safe rather than merely likely.
-constexpr int kProjectBufSize = (int)sizeof(Project);
+// The staging buffer is the undo buffer, so the format has to fit inside one -
+// but the file carries a magic, a version, per-section counts and a checksum
+// that the struct does not, and relying on struct padding to cover that is
+// exactly the kind of margin that disappears the next time a field moves. So
+// the undo buffer is a Project plus an explicit pad, and unit_tests.cpp
+// asserts a fully populated project still serialises within it.
+constexpr int kProjectScratchPad = 64;
+constexpr int kProjectBufSize    = (int)sizeof(Project) + kProjectScratchPad;
+
+struct ProjectScratch {
+    Project project;
+    uint8_t pad[kProjectScratchPad];
+};
 
 }  // namespace synth

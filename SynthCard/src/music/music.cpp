@@ -271,7 +271,7 @@ static void fillMelodic(Pattern& p, uint8_t track, Rng& rng, uint8_t root, uint8
         }
         st.note  = scaleDegree(baseNote, degree, scale);
         st.vel   = (uint8_t)(bass ? 95 + rng.below(30) : 70 + rng.below(52));
-        st.gate  = (uint8_t)(bass ? 6 + rng.below(6) : 4 + rng.below(9));
+        st.setGate(bass ? 6 + rng.below(6) : 4 + rng.below(9));
         st.flags = 0;
         if (!bass && rng.unipolar() < 0.12f) st.setProb(6);
         if (bass && rng.unipolar() < 0.15f) st.flags |= SF_SLIDE;

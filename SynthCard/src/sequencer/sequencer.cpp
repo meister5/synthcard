@@ -13,7 +13,7 @@ void Pattern::clear() {
     memset(mel, 0, sizeof(mel));
     memset(drum, 0, sizeof(drum));
     for (int t = 0; t < kMelTracks; ++t)
-        for (int s = 0; s < kMaxSteps; ++s) { mel[t][s].vel = 100; mel[t][s].gate = 8; }
+        for (int s = 0; s < kMaxSteps; ++s) { mel[t][s].vel = 100; mel[t][s].setGate(8); }
 }
 
 void Pattern::clearTrack(uint8_t track) {
@@ -21,7 +21,7 @@ void Pattern::clearTrack(uint8_t track) {
         for (int s = 0; s < kMaxSteps; ++s) {
             mel[track][s] = Step();
             mel[track][s].vel = 100;
-            mel[track][s].gate = 8;
+            mel[track][s].setGate(8);
         }
     } else {
         uint8_t lane = (uint8_t)(track - kMelTracks);
@@ -189,15 +189,16 @@ void Sequencer::fireStep() {
         // A mono or legato patch has one voice, so every chord tone would just
         // steal the last one and you would hear the top note instead of the
         // root. Mono means mono: play the root.
-        const uint8_t type = proj_->patch[t].get(P_VOICE_MODE) ? (uint8_t)CHORD_OFF : st.chord;
+        const uint8_t type = proj_->patch[t].get(P_VOICE_MODE) ? (uint8_t)CHORD_OFF : st.chord();
         int n = buildChord(st.note, type, proj_->root, proj_->scale, notes);
         for (int i = 0; i < n; ++i) {
             sink_->seqNoteOn((uint8_t)t, notes[i], vel, (st.flags & SF_SLIDE) != 0);
             soundingNote_[t][i] = notes[i];
         }
         soundingCount_[t] = (uint8_t)n;
-        int g = (st.gate < 16) ? (curStepSamples_ * (st.gate + 1)) / 16
-                               : curStepSamples_ * (st.gate - 14);
+        const uint8_t gt = st.gate();
+        int g = (gt < 16) ? (curStepSamples_ * (gt + 1)) / 16
+                          : curStepSamples_ * (gt - 14);
         gateCountdown_[t] = g < 32 ? 32 : g;
     }
 
@@ -261,9 +262,9 @@ void Sequencer::recordNote(uint8_t track, uint8_t note, uint8_t vel) {
     Step& st = proj_->pat[curPat_].mel[track][s];
     st.note  = note;
     st.vel   = vel ? vel : 100;
-    if (st.gate == 0) st.gate = 8;
+    if (st.gate() == 0) st.setGate(8);
     st.flags = (uint8_t)(st.flags & 0xF0);
-    st.chord = recChord_;                 // record what you actually heard
+    st.setChord(recChord_);                 // record what you actually heard
     recNote_[track]  = note;
     recStep_[track]  = (uint8_t)s;
     recStart_[track] = sampleClock_;
@@ -275,7 +276,7 @@ void Sequencer::recordNoteOff(uint8_t track, uint8_t note) {
     recNote_[track] = 0;
     Step& st = proj_->pat[curPat_].mel[track][recStep_[track] % kMaxSteps];
     if (st.note != note) return;                    // overwritten in the meantime
-    st.gate = gateForHeld(sampleClock_ - recStart_[track]);
+    st.setGate(gateForHeld(sampleClock_ - recStart_[track]));
 }
 
 void Sequencer::eraseStep(uint8_t track) {

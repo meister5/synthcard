@@ -330,7 +330,7 @@ firmware works fine with no card inserted.
 
 The format is an explicit little-endian field-by-field encoding — magic `SCPJ`,
 a version, then tempo, key, all eight patterns, the song, both patches, the kit
-and the effect settings — ending in an FNV-1a checksum. A project is 10,806
+and the effect settings — ending in an FNV-1a checksum. A project is 10,809
 bytes. The reader is version-aware and still loads v2 files: the drum lanes are
 remapped (v2's lane 4 was CLAP, which is lane 6 now, so copying by index would
 silently turn every saved clap into a ride) and patches are converted parameter
@@ -364,13 +364,17 @@ denormals. After about nine seconds the loop's filter states decay past 1e-38,
 and denormal arithmetic is handled in software. Filter and loop states are now
 flushed once per block throughout the engine.
 
-**Memory.** Static RAM is 108 KB, down from 122 KB before this work, despite
-six engines instead of four, twelve drum lanes instead of nine, and a larger
-project. The canvas is a 4-bit palette sprite: 16.2 KB from the heap instead of
+**Memory.** Static RAM is 105 KB, down from 122 KB before this work, despite
+six engines instead of four and twelve drum lanes instead of nine. The canvas is a 4-bit palette sprite: 16.2 KB from the heap instead of
 64.8 KB. The effects rack is 27 KB instead of 44 KB — the delay line runs at
 half rate for the same 500 ms, and the better reverb is the same size as the
-worse one. The firmware is ~702 KB, just over half of a 1.25 MB OTA slot;
-16 KB of that is wavetable data, which costs flash and no RAM at all.
+worse one. A step is four bytes rather than five - gate needs five bits and chord needs
+two, so they share a byte - which is 2 KB across the project and its undo copy.
+The firmware is ~702 KB, just over half of a 1.25 MB OTA slot; 16 KB of that is
+wavetable data, which costs flash and no RAM at all.
+
+Altogether that is about 66 KB returned to the heap and the static pool
+compared with the firmware this replaced.
 
 The UI is capped at ~33 fps so the display push never competes with audio.
 
