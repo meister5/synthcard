@@ -152,6 +152,29 @@ static void walkTheTour() {
     }
 }
 
+extern int g_colorViolations;
+extern uint32_t g_worstColor;
+
+// The 4-bit canvas is only safe if nothing ever asks for a colour outside the
+// palette. Everything above has already drawn every screen, every overlay, the
+// legend and the tour, so by here the whole interface has been exercised.
+static void everyColourIsInThePalette() {
+    // Prove the check can fail before trusting that it did not: an assertion
+    // that cannot fire is worse than no assertion at all.
+    const int realViolations = g_colorViolations;
+    hostCheckColor(0xFFFF);
+    CHECK(g_colorViolations == realViolations + 1,
+          "the palette check is not wired up - it did not notice colour 0xFFFF");
+    g_colorViolations = realViolations;
+
+    ++g_run;
+    if (g_colorViolations) {
+        ++g_fail;
+        printf("FAIL %d drawing calls used a colour outside the %d-entry palette "
+               "(highest %u)\n", g_colorViolations, ui::kPaletteSize, g_worstColor);
+    }
+}
+
 int main() {
     printf("SynthCard UI tests\n");
     // Pure table checks, safe before there is a canvas.
@@ -320,6 +343,7 @@ int main() {
     app.songCursor = kSongSlots - 1;
     drawEveryScreen("song-max");
 
+    everyColourIsInThePalette();
     printf("%d operations, %d failures\n", g_run, g_fail);
     return g_fail ? 1 : 0;
 }

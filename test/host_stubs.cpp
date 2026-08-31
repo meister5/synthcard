@@ -2,6 +2,7 @@
 // (SD / NVS) so the UI can be driven without a card.
 #include <M5Cardputer.h>
 #include "storage/storage.h"
+#include "ui/ui.h"
 #include <cstdio>
 #include <cstring>
 
@@ -58,3 +59,21 @@ int  projectList(char out[][kNameLen], int maxCount) {
     return n;
 }
 }  // namespace synth
+
+// Every colour the UI hands to the canvas passes through here. In palette mode
+// the whole interface has to live inside the sixteen entries; anything else is
+// a colour that would silently render as the nearest match on the device. This
+// is what makes the 4-bit canvas provable rather than merely plausible.
+int g_colorViolations = 0;
+uint32_t g_worstColor = 0;
+
+void hostCheckColor(uint32_t c) {
+#if SC_CANVAS_4BIT
+    if (c >= (uint32_t)synth::ui::kPaletteSize) {
+        ++g_colorViolations;
+        if (c > g_worstColor) g_worstColor = c;
+    }
+#else
+    (void)c;
+#endif
+}

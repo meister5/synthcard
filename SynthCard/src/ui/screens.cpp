@@ -21,7 +21,7 @@ static void paramRow(M5Canvas& g, int x, int y, int w, const char* name, const c
 
 static void trackBadge(M5Canvas& g, int x, int y, uint8_t track, bool muted) {
     const char* n = track == 0 ? "LEAD" : "BASS";
-    uint16_t c = muted ? C_DIM : (track == 0 ? C_ACCENT : C_ACC2);
+    Color c = muted ? C_DIM : (track == 0 ? C_ACCENT : C_ACC2);
     panel(g, x, y, 34, 11, C_PANEL2, c);
     textAt(g, x + 17, y + 2, n, c, &fonts::Font0, textdatum_t::top_center);
 }
@@ -187,7 +187,7 @@ static void drawDrum(App& a, int, int y0, int w, int h) {
             int cx = gx + i * cellW;
             if (st >= len) { g.drawRect(cx, ly, cellW - 2, laneH - 2, C_BG); continue; }
             uint8_t v = p.drum[l][st];
-            uint16_t col;
+            Color col;
             if (v) col = mute ? C_FAINT : (v > 110 ? C_ACCENT : C_ACC2);
             else   col = (st % 4 == 0) ? C_GRID : C_PANEL;
             g.fillRect(cx, ly, cellW - 2, laneH - 2, col);

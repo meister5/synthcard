@@ -15,7 +15,7 @@ M5Canvas& uiCanvas() { return *s_canvasPtr; }
 
 namespace ui {
 
-void bar(M5Canvas& g, int x, int y, int w, int h, float frac, uint16_t fg, uint16_t bg) {
+void bar(M5Canvas& g, int x, int y, int w, int h, float frac, Color fg, Color bg) {
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
     g.fillRect(x, y, w, h, bg);
@@ -23,7 +23,7 @@ void bar(M5Canvas& g, int x, int y, int w, int h, float frac, uint16_t fg, uint1
     if (fw > 0) g.fillRect(x, y, fw, h, fg);
 }
 
-void barBipolar(M5Canvas& g, int x, int y, int w, int h, float v, uint16_t fg, uint16_t bg) {
+void barBipolar(M5Canvas& g, int x, int y, int w, int h, float v, Color fg, Color bg) {
     g.fillRect(x, y, w, h, bg);
     int mid = x + w / 2;
     int len = (int)((w / 2) * (v < 0 ? -v : v));
@@ -33,12 +33,12 @@ void barBipolar(M5Canvas& g, int x, int y, int w, int h, float v, uint16_t fg, u
     g.drawFastVLine(mid, y - 1, h + 2, C_DIM);
 }
 
-void panel(M5Canvas& g, int x, int y, int w, int h, uint16_t fill, uint16_t border) {
+void panel(M5Canvas& g, int x, int y, int w, int h, Color fill, Color border) {
     g.fillRoundRect(x, y, w, h, 3, fill);
     if (border != fill) g.drawRoundRect(x, y, w, h, 3, border);
 }
 
-void textAt(M5Canvas& g, int x, int y, const char* s, uint16_t col, const void* font, uint8_t datum) {
+void textAt(M5Canvas& g, int x, int y, const char* s, Color col, const void* font, uint8_t datum) {
     g.setFont(static_cast<const lgfx::IFont*>(font));
     g.setTextColor(col);
     g.setTextDatum(datum);
@@ -56,18 +56,29 @@ void uiBegin() {
     static M5Canvas canvas(&M5.Display);
     s_canvasPtr = &canvas;
     M5.Display.setRotation(1);
-    M5.Display.fillScreen(C_BG);
+    M5.Display.fillScreen(displayRgb(0));
+#if SC_CANVAS_4BIT
+    // 4 bits per pixel with a 16-entry palette: 16.2 KB instead of 64.8 KB.
+    // Every drawing call then passes an index, which is what the C_* constants
+    // are in this mode.
+    canvas.setColorDepth(4);
+    s_canvasOk = canvas.createSprite(W, H) != nullptr;
+    if (s_canvasOk)
+        for (int i = 0; i < kPaletteSize; ++i)
+            canvas.setPaletteColor(i, kPalette[i].r, kPalette[i].g, kPalette[i].b);
+#else
     canvas.setColorDepth(16);
     s_canvasOk = canvas.createSprite(W, H) != nullptr;
+#endif
     canvas.setTextWrap(false);
 }
 
-// The 65 KB canvas should always fit, but a failed allocation must degrade to
-// a readable screen rather than a null-pointer write.
+// The canvas should always fit, but a failed allocation must degrade to a
+// readable screen rather than a null-pointer write.
 static bool canvasReady() {
     if (s_canvasOk) return true;
-    M5.Display.fillScreen(C_BG);
-    M5.Display.setTextColor(C_REC);
+    M5.Display.fillScreen(displayRgb(0));
+    M5.Display.setTextColor(displayRgb(8));
     M5.Display.setFont(&fonts::Font2);
     M5.Display.setCursor(8, 50);
     M5.Display.print("DISPLAY MEMORY ERROR");
@@ -78,7 +89,7 @@ static bool canvasReady() {
 static void drawTopBar(App& a) {
     M5Canvas& g = uiCanvas();
     const bool recOn = a.engine.seq().recording();
-    g.fillRect(0, 0, W, TOP_H, recOn ? rgb(70, 20, 26) : C_PANEL);
+    g.fillRect(0, 0, W, TOP_H, recOn ? C_RECBAR : C_PANEL);
     g.drawFastHLine(0, TOP_H, W, recOn ? C_REC : C_GRID);
 
     // mode name

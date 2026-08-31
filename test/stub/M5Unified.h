@@ -37,7 +37,9 @@ public:
     void setRotation(int) {}
     void setBrightness(uint8_t) {}
     void fillScreen(uint16_t) {}
-    void setTextColor(uint16_t) {}
+    // The display is 16-bit whatever depth the sprite runs at, so its colours
+    // are packed values, not palette indices, and are not checked.
+    void setTextColor(uint32_t) {}
     void setTextSize(int) {}
     void setCursor(int, int) {}
     void setFont(const lgfx::IFont*) {}
@@ -46,32 +48,38 @@ public:
     int  height() const { return 135; }
 };
 
+// Records every colour the UI asks for. In palette mode the firmware must
+// never request an index outside the palette, and hostCheckColor makes that a
+// test failure rather than a wrong-coloured pixel nobody notices.
+void hostCheckColor(uint32_t c);
+
 class M5Canvas {
 public:
     explicit M5Canvas(M5GFX* = nullptr) {}
     void setColorDepth(int d) { depth_ = d; }
+    void setPaletteColor(int i, uint8_t, uint8_t, uint8_t) { if (i > maxPal_) maxPal_ = i; }
     void* createSprite(int w, int h) { w_ = w; h_ = h; buf_ = new uint8_t[(size_t)w * h * 2]; return buf_; }
     void setTextWrap(bool) {}
-    void fillSprite(uint16_t) {}
+    void fillSprite(uint32_t c) { hostCheckColor(c); }
     void pushSprite(int, int) {}
-    void fillRect(int, int, int, int, uint16_t) {}
-    void drawRect(int, int, int, int, uint16_t) {}
-    void fillRoundRect(int, int, int, int, int, uint16_t) {}
-    void drawRoundRect(int, int, int, int, int, uint16_t) {}
-    void drawFastHLine(int, int, int, uint16_t) {}
-    void drawFastVLine(int, int, int, uint16_t) {}
-    void fillTriangle(int, int, int, int, int, int, uint16_t) {}
-    void fillCircle(int, int, int, uint16_t) {}
-    void drawCircle(int, int, int, uint16_t) {}
-    void drawLine(int, int, int, int, uint16_t) {}
-    void drawPixel(int, int, uint16_t) {}
+    void fillRect(int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawRect(int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void fillRoundRect(int,int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawRoundRect(int,int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawFastHLine(int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawFastVLine(int,int,int,uint32_t c) { hostCheckColor(c); }
+    void fillTriangle(int,int,int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void fillCircle(int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawCircle(int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawLine(int,int,int,int,uint32_t c) { hostCheckColor(c); }
+    void drawPixel(int,int,uint32_t c) { hostCheckColor(c); }
     void setFont(const lgfx::IFont*) {}
-    void setTextColor(uint16_t) {}
+    void setTextColor(uint32_t c) { hostCheckColor(c); }
     void setTextDatum(uint8_t) {}
     void drawString(const char* s, int, int) { hostCheckString(s); }
     ~M5Canvas() { delete[] buf_; }
 private:
-    int depth_ = 16, w_ = 0, h_ = 0;
+    int depth_ = 16, w_ = 0, h_ = 0, maxPal_ = -1;
     uint8_t* buf_ = nullptr;
 };
 
