@@ -67,6 +67,11 @@ static inline int16_t toI16(float v) {
 static constexpr float kFromI16 = 1.0f / 32768.0f;
 
 void Effects::process(float* dry, const float* dlySend, const float* revSend, int n) {
+    // A reverb tail decaying into denormal range costs more than the whole
+    // rest of the mix on an FPU that traps denormals; see flushDenormal.
+    for (int i = 0; i < kCombCount; ++i) combStore_[i] = flushDenormal(combStore_[i]);
+    dLp_    = flushDenormal(dLp_);
+    limGain_ = flushDenormal(limGain_);
     float pk = 0.0f;
     for (int i = 0; i < n; ++i) {
         float in = dry[i];

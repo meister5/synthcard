@@ -320,6 +320,8 @@ void DrumEngine::render(float* out, float* dly, float* rev, int n) {
     for (uint8_t lane = 0; lane < DL_COUNT; ++lane) {
         DV& d = v_[lane];
         if (!d.active) continue;
+        d.filt.flush();
+        d.filt2.flush();
 
         // The family is resolved once here rather than once per sample, which
         // is the whole reason the old switch-in-the-inner-loop is gone.

@@ -155,6 +155,9 @@ void Voice::render(float* out, int n) {
     const float   drv = pt.norm(P_DRIVE);
     const float   lvl = pt.norm(P_LEVEL) * velGain_;
 
+    filter_.flush();
+    filter2_.flush();
+
     float buf[kCtrlChunk];
     int done = 0;
     while (done < n) {

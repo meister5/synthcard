@@ -89,6 +89,17 @@ inline float fastExp2(float x) {
 // Note number -> Hz via fastExp2. Used per note-on and per control chunk.
 inline float noteToHzFast(float note) { return 440.0f * fastExp2((note - 69.0f) * (1.0f / 12.0f)); }
 
+// Flushes a value that has decayed into denormal territory to zero.
+//
+// This is not a micro-optimisation. A filter state ringing down past ~1e-38
+// enters denormal range, and denormal arithmetic is handled in software on the
+// LX7 - a decayed reverb tail or a held Karplus-Strong string can then cost
+// more than every other voice combined. Measured on the host benchmark, a
+// sustained pluck went from 1.2x an ANALOG voice to 18x once its state decayed
+// that far. States are flushed once per block, which catches it immediately
+// and costs a handful of compares.
+inline float flushDenormal(float v) { return (v > -1e-25f && v < 1e-25f) ? 0.0f : v; }
+
 // ---- shared voice primitives --------------------------------------------
 // These live here rather than in voice.h because the engines and the drum
 // families need them too, and a drum lane should not have to include a
@@ -136,6 +147,8 @@ private:
 class SVF {
 public:
     void reset() { ic1_ = ic2_ = 0.0f; }
+    // Called once per block; see flushDenormal above.
+    void flush() { ic1_ = flushDenormal(ic1_); ic2_ = flushDenormal(ic2_); }
     void setCoeffs(float cutoffHz, float q);
     inline float process(float in, uint8_t type) {
         float v3 = in - ic2_;

@@ -125,6 +125,12 @@ void pluckNoteOn(PluckState& s, const Patch& pt, float hz, float vel, Rng& rng) 
 
 void pluckRender(PluckState& s, const EngineCtx& c, float* out, int n) {
     if (!s.buf) { for (int i = 0; i < n; ++i) out[i] = 0.0f; return; }
+    // A held string decays smoothly into denormal range after several seconds.
+    s.ap  = flushDenormal(s.ap);
+    s.lp  = flushDenormal(s.lp);
+    s.dcX = flushDenormal(s.dcX);
+    s.dcY = flushDenormal(s.dcY);
+    s.bodyFilt.flush();
     const float damp = s.damp;
     const float a    = s.frac;
     const float bodyAmt = s.bodyAmt;
