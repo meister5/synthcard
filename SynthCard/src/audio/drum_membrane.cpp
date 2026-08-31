@@ -33,13 +33,16 @@ void membraneTrigger(DV& d, const DrumHit& h, uint8_t lane) {
     const float velTilt = 0.55f + h.vel * 0.45f;
 
     if (kick) {
-        // Stage 1: down from ~8x f0 in about 6 ms. That sweep passes straight
-        // through 400-150 Hz, which is the part you actually hear.
-        d.pitch      = (5.0f + h.tone * 5.0f) * velTilt;
-        d.pitchCoef  = decCoef(4.0f + h.tone * 5.0f);
+        // Stage 1: down from ~6x f0, and deliberately slowly - 18-40 ms
+        // rather than the handful the first cut used. The sweep through
+        // 350-150 Hz IS the audible part of a kick on a speaker with no
+        // bottom octave, so it has to last long enough to be heard as a
+        // thump rather than register as a click.
+        d.pitch      = (4.0f + h.tone * 3.5f) * velTilt;
+        d.pitchCoef  = decCoef(18.0f + h.tone * 22.0f);
         // Stage 2: a slower settle so the tail is not dead flat.
-        d.pitch2     = 0.55f + h.tone * 0.5f;
-        d.pitch2Coef = decCoef(30.0f + h.tone * 60.0f);
+        d.pitch2     = 0.45f + h.tone * 0.45f;
+        d.pitch2Coef = decCoef(60.0f + h.tone * 110.0f);
         d.ampCoef    = decCoef(45.0f + h.decay * 720.0f);
         // Click: 1.5-3 ms of high-passed noise. Attack definition on a tiny
         // transducer comes almost entirely from this.
@@ -54,7 +57,7 @@ void membraneTrigger(DV& d, const DrumHit& h, uint8_t lane) {
         d.noiseAmp   = 0.0f;
         // Saturation is not optional here: it is what generates the audible
         // harmonics. Even at DRIVE 0 the body gets pushed a little.
-        d.drive      = 1.6f + h.drive * 9.0f;
+        d.drive      = 2.6f + h.drive * 9.0f;
     } else {
         d.pitch      = (1.1f + h.tone * 2.4f) * velTilt;
         d.pitchCoef  = decCoef(28.0f + h.tone * 90.0f);

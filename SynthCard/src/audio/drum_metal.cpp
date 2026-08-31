@@ -42,7 +42,7 @@ void metalTrigger(DV& d, const DrumHit& h, uint8_t lane) {
         case DL_RIDE:
             base  = 150.0f + h.tune * 170.0f;
             ms    = 320.0f + h.decay * 2000.0f;
-            bp    = 3200.0f + h.tone * 4200.0f; bpQ = 1.6f;
+            bp    = 3200.0f + h.tone * 4200.0f; bpQ = 1.1f;
             hp    = 2400.0f + h.tone * 2600.0f;
             noise = 0.07f;
             break;
@@ -50,7 +50,9 @@ void metalTrigger(DV& d, const DrumHit& h, uint8_t lane) {
             // Only two oscillators, the 540/800 Hz pair, band-passed tight.
             base  = 480.0f + h.tune * 420.0f;
             ms    = 130.0f + h.decay * 420.0f;
-            bp    = 1900.0f + h.tone * 2200.0f; bpQ = 2.6f;
+            // A gentler Q than the other metals: a tight one rings up over
+            // ten milliseconds, and a cowbell has to be instant.
+            bp    = 1900.0f + h.tone * 2200.0f; bpQ = 1.5f;
             hp    = 480.0f;
             noise = 0.0f;
             break;
@@ -119,7 +121,12 @@ void metalRender(DV& d, uint8_t lane, float* out, int n) {
 
         // Band-pass then high-pass. The band-pass picks the metallic region,
         // the high-pass removes the low thud the square edges leave behind.
-        float s = d.filt.process(metal, 3) * 1.8f;
+        //
+        // The gain is large because the band-pass sits far above the
+        // oscillators' fundamentals and is selecting their 20th-40th
+        // harmonics, whose amplitudes are a few percent of the square. At
+        // unity this whole family came out ~14 dB below the kick.
+        float s = d.filt.process(metal, 3) * 9.0f;
         if (!bell) s = d.filt2.process(s, 2);
 
         if (d.snap > 0.0005f) {

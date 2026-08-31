@@ -16,6 +16,12 @@ namespace synth {
 
 class Voice {
 public:
+    // A voice can be holding a line from the pluck pool, and the pool tracks
+    // its owner by address. In the firmware voices outlive everything, but a
+    // Voice on a stack somewhere - a test, the host renderer - would leave the
+    // pool pointing at freed memory for the next note to write through.
+    ~Voice() { kill(); }
+
     void init(uint32_t seed);
     void setPatch(const Patch* p) { patch_ = p; }
     const Patch* patch() const { return patch_; }

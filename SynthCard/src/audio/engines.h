@@ -80,6 +80,8 @@ struct PluckState {
     float    ap;                        // allpass interpolator state
     float    lp;                        // loop lowpass state
     float    damp;
+    float    loss;              // per-sample loop gain, always < 1
+    float    dcX, dcY;          // DC blocker state
     float    bow;               // continuous excitation for the BOW mode
     float    body1, body2, bodyAmt;
     SVF      bodyFilt;

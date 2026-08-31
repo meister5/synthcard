@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include "wav.h"
 
 using namespace synth;
 
@@ -1088,6 +1089,162 @@ static void testV1Compatibility() {
 }
 
 // ---------------------------------------------------------------------------
+// Sound-quality regressions. These pin the specific defects that were found by
+// listening to the renderer's output and measuring it; every one of them was a
+// real bug that the "is it finite and non-silent" tests above did not catch.
+static std::vector<float> renderLane(DrumKit& kit, uint8_t lane, uint8_t vel, float sec) {
+    DrumEngine d;
+    d.init();
+    d.setKit(&kit);
+    d.trigger(lane, vel);
+    std::vector<float> out;
+    float b[kBlockSize], sd[kBlockSize], sr[kBlockSize];
+    for (int done = 0; done < (int)(sec * kSampleRate); done += kBlockSize) {
+        memset(b, 0, sizeof(b)); memset(sd, 0, sizeof(sd)); memset(sr, 0, sizeof(sr));
+        d.render(b, sd, sr, kBlockSize);
+        for (int i = 0; i < kBlockSize; ++i) out.push_back(b[i]);
+    }
+    return out;
+}
+
+static std::vector<float> renderNote(const Patch& pt, uint8_t note, float sec) {
+    Voice v;
+    v.init(0x1234);
+    v.setPatch(&pt);
+    v.noteOn(note, 110, false);
+    std::vector<float> out;
+    float b[kBlockSize];
+    for (int done = 0; done < (int)(sec * kSampleRate); done += kBlockSize) {
+        memset(b, 0, sizeof(b));
+        v.render(b, kBlockSize);
+        for (int i = 0; i < kBlockSize; ++i) out.push_back(b[i]);
+    }
+    return out;
+}
+
+static void testDrumSound() {
+    for (uint8_t k = 0; k < kKitCount; ++k) {
+        DrumKit kit;
+        loadKit(kit, k);
+
+        // The kick has to survive the speaker. The Cardputer reproduces almost
+        // nothing below ~200 Hz, so a kick whose level collapses through a
+        // 200 Hz high-pass is one you cannot hear on the device however good
+        // it looks on a scope.
+        auto kick = renderLane(kit, DL_KICK, 120, 1.2f);
+        const float hp = wav::highPassPeakDb(kick, 200.0f);
+        CHECK(hp > -18.0f, "kit %s kick is %.1f dB through a 200 Hz high-pass - inaudible on the device",
+              kit.name, hp);
+
+        // Lane balance: nothing may sit more than 14 dB off the kick, or it is
+        // either inaudible in a mix or drowning everything else. The metal
+        // lanes were 14 dB down before their gain staging was fixed.
+        const float ref = wav::peak(kick);
+        CHECK(ref > 0.01f, "kit %s kick is silent", kit.name);
+        for (uint8_t lane = 0; lane < DL_COUNT; ++lane) {
+            const float p = wav::peak(renderLane(kit, lane, 110, 1.2f));
+            const float db = 20.0f * log10f(fmaxf(p, 1e-6f) / ref);
+            CHECK(db > -14.0f && db < 10.0f,
+                  "kit %s lane %s is %+.1f dB against the kick", kit.name, kDrumShort[lane], db);
+        }
+    }
+
+    // A closed hat must actually cut an open one, and over a fade rather than
+    // a hard edge, because a hard edge clicks.
+    DrumKit kit;
+    loadKit(kit, 0);
+    DrumEngine d;
+    d.init();
+    d.setKit(&kit);
+    d.trigger(DL_OHH, 120);
+    float b[kBlockSize], sd[kBlockSize], sr[kBlockSize];
+    for (int i = 0; i < 20; ++i) {
+        memset(b, 0, sizeof(b)); memset(sd, 0, sizeof(sd)); memset(sr, 0, sizeof(sr));
+        d.render(b, sd, sr, kBlockSize);
+    }
+    const float before = d.laneLevel(DL_OHH);
+    CHECK(before > 0.1f, "open hat should still be ringing before the choke");
+    d.trigger(DL_CHH, 120);
+    // 3 ms is a little over the 2 ms fade.
+    for (int i = 0; i < 3 * 32 / kBlockSize + 1; ++i) {
+        memset(b, 0, sizeof(b)); memset(sd, 0, sizeof(sd)); memset(sr, 0, sizeof(sr));
+        d.render(b, sd, sr, kBlockSize);
+    }
+    CHECK(d.laneLevel(DL_OHH) < before * 0.1f,
+          "closed hat did not choke the open hat (%.3f -> %.3f)", before, d.laneLevel(DL_OHH));
+    CHECK(kChokeGroup[DL_CHH] == kChokeGroup[DL_OHH] && kChokeGroup[DL_CHH] != 0,
+          "hats must share a choke group");
+}
+
+static void testEngineSound() {
+    // Every engine, played bare, must be in tune and free of folded-back
+    // harmonics. Both were broken: PLUCK was an octave out at some notes and
+    // collapsed into a 2 Hz rumble at the top of the keyboard, and the
+    // wavetable reader was re-introducing the aliasing the mip-maps exist to
+    // remove.
+    for (uint8_t eng = 0; eng < ENG_COUNT; ++eng) {
+        Patch pt;
+        pt.reset();
+        pt.setEngine(eng);
+        pt.set(P_FIL_TYPE, 0);
+        pt.set(P_LFO_AMT, 0);
+        pt.set(P_AMP_A, 0);
+        pt.set(P_AMP_S, 127);
+
+        for (uint8_t note : {48, 60, 72, 84}) {
+            auto x = renderNote(pt, note, 0.5f);
+            CHECK(wav::peak(x) > 0.005f, "%s is silent at note %d", kEngineNames[eng], note);
+            CHECK(wav::peak(x) < 2.0f, "%s clips at note %d (%.2f)", kEngineNames[eng], note,
+                  wav::peak(x));
+            CHECK(fabsf(wav::dcOffset(x)) < 0.02f, "%s has DC at note %d (%.4f)",
+                  kEngineNames[eng], note, wav::dcOffset(x));
+
+            auto sp = wav::spectrum(x, 2048, 8192, kSampleRate);
+            const float played = 440.0f * powf(2.0f, (note - 69) / 12.0f);
+            // ORGAN's 16' drawbar sits an octave below the note, so its
+            // harmonic grid starts there.
+            const float f0 = (eng == ENG_ORGAN) ? played * 0.5f : played;
+            const float alias = wav::aliasEnergy(sp, f0) * 100.0f;
+            CHECK(alias < 12.0f, "%s note %d: %.0f%% of its energy is off-harmonic",
+                  kEngineNames[eng], note, alias);
+
+            // The strongest partial must belong to the note. This is what
+            // catches a mistuned string or an oscillator running at the wrong
+            // rate, which no amount of "is it finite" would notice.
+            size_t best = 1;
+            for (size_t i = 2; i < sp.mag.size(); ++i) if (sp.mag[i] > sp.mag[best]) best = i;
+            const float strongest = best * sp.binHz;
+            const float ratio = strongest / f0;
+            const float nearest = roundf(ratio);
+            CHECK(nearest >= 1.0f && fabsf(ratio - nearest) < 0.04f,
+                  "%s note %d: strongest partial %.0f Hz is not a harmonic of %.0f Hz",
+                  kEngineNames[eng], note, strongest, f0);
+        }
+    }
+
+    // The pluck pool is finite; running out must degrade rather than corrupt.
+    pluckPoolReset();
+    CHECK(pluckLinesFree() == kPluckLines, "pluck pool did not reset");
+    {
+        Patch pt; pt.reset(); pt.setEngine(ENG_PLUCK);
+        Voice v[kPluckLines + 2];
+        for (int i = 0; i < kPluckLines + 2; ++i) {
+            v[i].init(0x100u + i);
+            v[i].setPatch(&pt);
+            v[i].noteOn((uint8_t)(50 + i), 100, false);
+        }
+        float b[kBlockSize];
+        for (int i = 0; i < kPluckLines + 2; ++i) {
+            memset(b, 0, sizeof(b));
+            v[i].render(b, kBlockSize);
+            for (int s = 0; s < kBlockSize; ++s)
+                CHECK(finite_(b[s]), "pluck voice %d produced a non-finite sample past the pool", i);
+        }
+    }
+    pluckPoolReset();
+}
+
+// ---------------------------------------------------------------------------
 int main() {
     printf("SynthCard unit tests\n");
     testDsp();
@@ -1097,6 +1254,8 @@ int main() {
     testVoice();
     testVoiceRange();
     testDrums();
+    testDrumSound();
+    testEngineSound();
     testEffects();
     testSequencerTiming();
     testSequencerPatternsAndSong();

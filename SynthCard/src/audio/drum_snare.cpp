@@ -56,8 +56,11 @@ void snareTrigger(DV& d, const DrumHit& h, uint8_t lane) {
         // Shell noise: band-passed low, around the drum's own register.
         d.filt.setCoeffs(clampf(f0 * 1.5f, 150.0f, 1200.0f), 1.5f);
         d.filt2.reset();
-        // Wires: high-passed, brightened by TONE.
-        d.filt2.setCoeffs(clampf(2600.0f + h.tone * 5200.0f, 1200.0f, 13500.0f), 0.8f);
+        // Wires: BAND-passed, not high-passed. A high-pass leaves everything
+        // above its corner in place, which puts the snare's spectral centre up
+        // around 6 kHz where it reads as hiss with a beep under it. Real snare
+        // wires occupy a band, so this is a band.
+        d.filt2.setCoeffs(clampf(2200.0f + h.tone * 3400.0f, 900.0f, 9000.0f), 0.9f);
     }
     d.ph = 0.0f;
     d.ph2 = 0.0f;
@@ -84,7 +87,7 @@ void snareRender(DV& d, uint8_t lane, float* out, int n) {
             float body = fastSin01(d.ph) * 0.62f + fastSin01(d.ph2) * 0.34f;
 
             const float shell = d.filt.process(d.rng.bipolar(), 3) * d.noiseAmp * 1.6f;
-            const float wires = d.filt2.process(d.rng.bipolar(), 2) * d.noise2Amp;
+            const float wires = d.filt2.process(d.rng.bipolar(), 3) * d.noise2Amp * 2.2f;
 
             s = softClip((body + shell) * drive) * comp + wires;
 
