@@ -287,27 +287,41 @@ void randomMelody(Pattern& p, uint8_t track, Rng& rng, uint8_t root, uint8_t sca
 
 void randomizePatch(Patch& pt, Rng& rng, uint8_t amountPct) {
     // Controlled randomisation: only parameters that stay musical when moved,
-    // and only by +-amount around their current value.
+    // and only by +-amount around their current value. The engine itself is
+    // never rolled - the player picks the engine, the dice pick a sound
+    // inside it.
     static const uint8_t kSafe[] = {
-        P_O1_WAVE, P_O2_WAVE, P_O2_LEVEL, P_O2_DETUNE, P_SUB_LEVEL, P_PW,
         P_AMP_A, P_AMP_D, P_AMP_S, P_AMP_R,
         P_CUTOFF, P_RESO, P_FEG_AMT, P_FEG_D, P_FEG_S,
         P_LFO_WAVE, P_LFO_RATE, P_LFO_AMT, P_LFO_DEST,
         P_DRIVE, P_SEND_DLY, P_SEND_REV,
     };
     // Ranges that keep a patch playable no matter what the dice say.
-    static const uint8_t kLo[] = { 0,0,0,32,0,24,  0,20,0,10,  40,0,40,16,0,  0,4,0,0,  0,0,0 };
-    static const uint8_t kHi[] = { 5,5,110,96,90,104, 60,110,127,90, 124,110,110,90,90, 4,110,80,3, 80,80,90 };
+    static const uint8_t kLo[] = {  0, 20,  0, 10,  40,  0, 40, 16,  0,  0,  4,  0, 0,  0,  0,  0 };
+    static const uint8_t kHi[] = { 60,110,127, 90, 124,110,110, 90, 90,  4,110, 80, 3, 80, 80, 90 };
     const float amt = clampf(amountPct * 0.01f, 0.05f, 1.0f);
+
     for (unsigned i = 0; i < sizeof(kSafe) / sizeof(kSafe[0]); ++i) {
-        uint8_t id = kSafe[i];
-        int lo = kLo[i], hi = kHi[i];
-        int cur = pt.p[id];
-        int span = (int)((hi - lo) * amt);
-        if (span < 1) span = 1;
-        int v = cur + (int)rng.below((uint32_t)(span * 2 + 1)) - span;
+        const uint8_t id = kSafe[i];
+        const int lo = kLo[i], hi = kHi[i];
+        const int span = clampi((int)((hi - lo) * amt), 1, 127);
+        const int v = pt.p[id] + (int)rng.below((uint32_t)(span * 2 + 1)) - span;
         pt.set(id, clampi(v, lo, hi));
     }
+
+    // The engine's own parameters, over their declared ranges. Going through
+    // engineRandomSlots() means a new engine is randomisable the moment its
+    // table exists, with no second list to keep in step here.
+    const uint8_t* slots = engineRandomSlots(pt.engine());
+    for (int i = 0; slots[i] != 0xFF; ++i) {
+        const uint8_t id = slots[i];
+        const ParamInfo& in = paramInfo(pt.engine(), id);
+        if (in.max == 0) continue;
+        const int span = clampi((int)(in.max * amt), 1, 127);
+        const int v = pt.p[id] + (int)rng.below((uint32_t)(span * 2 + 1)) - span;
+        pt.set(id, clampi(v, 0, in.max));
+    }
+
     strncpy(pt.name, "RANDOM", sizeof(pt.name) - 1);
     pt.name[sizeof(pt.name) - 1] = 0;
 }

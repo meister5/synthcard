@@ -100,26 +100,48 @@ static void testPresets() {
     for (uint16_t i = 0; i < kPresetCount; ++i) {
         loadPreset(p, i);
         CHECK(p.name[0] != 0, "preset %d has no name", i);
+        const uint8_t eng = p.engine();
         for (uint8_t id = 0; id < P_COUNT; ++id)
-            CHECK(p.p[id] <= kSynthParamInfo[id].max,
-                  "preset %s param %s = %d > max %d", p.name, kSynthParamInfo[id].name,
-                  p.p[id], kSynthParamInfo[id].max);
+            CHECK(p.p[id] <= paramInfo(eng, id).max,
+                  "preset %s param %s = %d > max %d", p.name, paramInfo(eng, id).name,
+                  p.p[id], paramInfo(eng, id).max);
         char buf[24];
         for (uint8_t id = 0; id < P_COUNT; ++id) {
             formatParam(p, id, buf, sizeof(buf));
-            CHECK(buf[0] != 0, "param %s formatted empty", kSynthParamInfo[id].name);
+            CHECK(buf[0] != 0, "param %s formatted empty", paramInfo(eng, id).name);
         }
     }
-    // Every page slot must reference a real parameter.
-    for (uint8_t pg = 0; pg < kSynthPageCount; ++pg)
-        for (uint8_t i = 0; i < kSynthPages[pg].n; ++i)
-            CHECK(kSynthPages[pg].p[i] < P_COUNT, "page %s slot %d out of range", kSynthPages[pg].name, i);
-    // Every parameter should be reachable from some page.
-    bool seen[P_COUNT] = {false};
-    for (uint8_t pg = 0; pg < kSynthPageCount; ++pg)
-        for (uint8_t i = 0; i < kSynthPages[pg].n; ++i) seen[kSynthPages[pg].p[i]] = true;
-    for (uint8_t id = 0; id < P_COUNT; ++id)
-        if (id != P_BEND) CHECK(seen[id], "param %s is not on any page", kSynthParamInfo[id].name);
+    // Every page slot of every engine must reference a real parameter, and
+    // every parameter an engine declares must be reachable from one of its
+    // pages - otherwise a knob exists that no one can turn.
+    for (uint8_t eng = 0; eng < ENG_COUNT; ++eng) {
+        const ParamPage* pages = synthPages(eng);
+        const uint8_t nPages = synthPageCount(eng);
+        bool seen[P_COUNT] = {false};
+        for (uint8_t pg = 0; pg < nPages; ++pg) {
+            CHECK(pages[pg].n <= 6, "%s page %s has %d slots", kEngineNames[eng],
+                  pages[pg].name, pages[pg].n);
+            for (uint8_t i = 0; i < pages[pg].n; ++i) {
+                CHECK(pages[pg].p[i] < P_COUNT, "%s page %s slot %d out of range",
+                      kEngineNames[eng], pages[pg].name, i);
+                seen[pages[pg].p[i]] = true;
+            }
+        }
+        for (uint8_t id = 0; id < P_COUNT; ++id) {
+            if (id == P_BEND) continue;
+            if (paramInfo(eng, id).max == 0) continue;      // inert overlay slot
+            CHECK(seen[id], "%s param %s is not on any page", kEngineNames[eng],
+                  paramInfo(eng, id).name);
+        }
+    }
+    // Switching engine must leave every parameter inside its new range.
+    for (uint8_t eng = 0; eng < ENG_COUNT; ++eng) {
+        Patch q; q.reset(); q.setEngine(eng);
+        CHECK(q.engine() == eng, "setEngine(%d) did not stick", eng);
+        for (uint8_t id = 0; id < P_COUNT; ++id)
+            CHECK(q.p[id] <= paramInfo(eng, id).max, "%s default %s out of range",
+                  kEngineNames[eng], paramInfo(eng, id).name);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,10 +207,12 @@ static void testDrums() {
         for (uint8_t lane = 0; lane < DL_COUNT; ++lane) {
             d.allOff();
             d.trigger(lane, 110);
-            float peak = 0.0f, buf[kBlockSize];
+            float peak = 0.0f, buf[kBlockSize], sd[kBlockSize], sr[kBlockSize];
             for (int b = 0; b < 30; ++b) {
                 memset(buf, 0, sizeof(buf));
-                d.render(buf, kBlockSize);
+                memset(sd, 0, sizeof(sd));
+                memset(sr, 0, sizeof(sr));
+                d.render(buf, sd, sr, kBlockSize);
                 for (int s = 0; s < kBlockSize; ++s) {
                     CHECK(finite_(buf[s]), "kit %s lane %s non-finite", kit.name, kDrumNames[lane]);
                     peak = fmaxf(peak, fabsf(buf[s]));
@@ -200,8 +224,11 @@ static void testDrums() {
         // Everything must decay to silence rather than hang on.
         d.allOff();
         for (uint8_t lane = 0; lane < DL_COUNT; ++lane) d.trigger(lane, 127);
-        float buf[kBlockSize];
-        for (int b = 0; b < 2000; ++b) { memset(buf, 0, sizeof(buf)); d.render(buf, kBlockSize); }
+        float buf[kBlockSize], sd[kBlockSize], sr[kBlockSize];
+        for (int b = 0; b < 2000; ++b) {
+            memset(buf, 0, sizeof(buf)); memset(sd, 0, sizeof(sd)); memset(sr, 0, sizeof(sr));
+            d.render(buf, sd, sr, kBlockSize);
+        }
         for (uint8_t lane = 0; lane < DL_COUNT; ++lane)
             CHECK(!d.laneActive(lane), "kit %s lane %s never decayed", kit.name, kDrumNames[lane]);
     }
@@ -785,8 +812,8 @@ static void testGenerators() {
     for (int i = 0; i < 200; ++i) {
         randomizePatch(pt, rng, 80);
         for (uint8_t id = 0; id < P_COUNT; ++id)
-            CHECK(pt.p[id] <= kSynthParamInfo[id].max, "randomiser blew param %s to %d",
-                  kSynthParamInfo[id].name, pt.p[id]);
+            CHECK(pt.p[id] <= paramInfo(pt.engine(), id).max, "randomiser blew param %s to %d",
+                  paramInfo(pt.engine(), id).name, pt.p[id]);
     }
     // A randomised patch must still make sound.
     Voice v;
@@ -887,7 +914,28 @@ static void testProjectFormat() {
 
 // Builds a project file in the v1 layout (before Step gained a chord byte) so
 // that songs saved by the shipped firmware are proven to still load.
-static int writeV1Blob(const Project& p, uint8_t* b) {
+// A faithful v2 writer: nine drum lanes in the old order, four drum
+// parameters, a kit-wide pair of sends, and a 38-entry patch in the old flat
+// layout. Nothing here may be expressed in terms of the current constants, or
+// the test would drift along with the format it is supposed to pin down.
+static constexpr int kOldDrums      = 9;
+static constexpr int kOldDrumParams = 4;
+static constexpr int kOldPatchCount = 38;
+
+// Old parameter indices, named so the assertions below read as intent.
+enum : uint8_t {
+    O_ENGINE = 0, O_O1_WAVE, O_O1_LEVEL, O_O2_WAVE, O_O2_LEVEL, O_O2_SEMI,
+    O_O2_DETUNE, O_SUB_WAVE, O_SUB_LEVEL, O_NOISE, O_PW, O_FINE, O_GLIDE,
+    O_AMP_A, O_AMP_D, O_AMP_S, O_AMP_R,
+    O_FIL_TYPE, O_CUTOFF, O_RESO, O_FEG_AMT, O_KEYTRK,
+    O_FEG_A, O_FEG_D, O_FEG_S, O_FEG_R,
+    O_LFO_WAVE, O_LFO_RATE, O_LFO_AMT, O_LFO_DEST, O_LFO_SYNC,
+    O_VOICE_MODE, O_VELO_AMT, O_DRIVE, O_LEVEL, O_SEND_DLY, O_SEND_REV, O_BEND
+};
+
+static int writeV2Blob(const Project& p, const uint8_t oldPatch[kOldPatchCount],
+                       const uint8_t oldKit[kOldDrums][kOldDrumParams],
+                       uint8_t sendDly, uint8_t sendRev, uint8_t* b) {
     int n = 0;
     auto u8  = [&](uint8_t v) { b[n++] = v; };
     auto u16 = [&](uint16_t v) { u8((uint8_t)(v & 0xFF)); u8((uint8_t)(v >> 8)); };
@@ -895,30 +943,33 @@ static int writeV1Blob(const Project& p, uint8_t* b) {
     auto raw = [&](const void* s2, int l) { memcpy(b + n, s2, l); n += l; };
 
     u32(kProjectMagic);
-    u16(1);
+    u16(2);
     raw(p.name, kNameLen);
     u16(p.bpm);
     u8(p.swing); u8(p.scale); u8(p.root); u8(p.octave);
     u8(p.arpOn); u8(p.arpMode); u8(p.arpRate); u8(p.arpOct); u8(p.arpGate);
-    u8(kPatternCount); u8(kMelTracks); u8(DL_COUNT); u8(kMaxSteps);
+    u8(kPatternCount); u8(kMelTracks); u8(kOldDrums); u8(kMaxSteps);
     for (int i = 0; i < kPatternCount; ++i) {
         const Pattern& pa = p.pat[i];
         raw(pa.name, 9);
         u8(pa.length); u8(pa.muteMel); u16(pa.muteDrum);
         for (int t = 0; t < kMelTracks; ++t)
-            for (int st = 0; st < kMaxSteps; ++st) {          // 4 bytes, no chord
+            for (int st = 0; st < kMaxSteps; ++st) {          // v2: 5 bytes
                 u8(pa.mel[t][st].note); u8(pa.mel[t][st].vel);
                 u8(pa.mel[t][st].gate); u8(pa.mel[t][st].flags);
+                u8(pa.mel[t][st].chord);
             }
-        for (int l = 0; l < DL_COUNT; ++l) raw(pa.drum[l], kMaxSteps);
+        // v2 wrote nine lanes in the old order; the reader has to put them
+        // back where they belong now.
+        for (int l = 0; l < kOldDrums; ++l) raw(pa.drum[l], kMaxSteps);
     }
     u8(p.song.length);
     for (int i = 0; i < kSongSlots; ++i) { u8(p.song.slot[i].pattern); u8(p.song.slot[i].repeat); }
-    u8(P_COUNT);
-    for (int t = 0; t < kMelTracks; ++t) { raw(p.patch[t].name, 13); raw(p.patch[t].p, P_COUNT); }
+    u8(kOldPatchCount);
+    for (int t = 0; t < kMelTracks; ++t) { raw(p.patch[t].name, 13); raw(oldPatch, kOldPatchCount); }
     raw(p.kit.name, 13);
-    for (int l = 0; l < DL_COUNT; ++l) raw(p.kit.p[l], DP_COUNT);
-    u8(p.kit.sendDly); u8(p.kit.sendRev);
+    for (int l = 0; l < kOldDrums; ++l) raw(oldKit[l], kOldDrumParams);
+    u8(sendDly); u8(sendRev);
     u8(FX_COUNT);
     raw(p.fx.p, FX_COUNT);
 
@@ -940,28 +991,100 @@ static void testV1Compatibility() {
         randomDrums(src.pat[i], rng, 60);
         randomMelody(src.pat[i], 0, rng, 0, 2, 4);
     }
-    loadPreset(src.patch[0], 7);
-    loadKit(src.kit, 3);
 
-    const int n = writeV1Blob(src, buf);
+    // A v2 subtractive patch with values chosen so a mis-mapped parameter
+    // cannot pass by coincidence.
+    uint8_t oldPatch[kOldPatchCount] = {0};
+    oldPatch[O_ENGINE] = 0;              // v2 subtractive -> ANALOG
+    oldPatch[O_O1_WAVE] = 2; oldPatch[O_O1_LEVEL] = 111;
+    oldPatch[O_O2_WAVE] = 1; oldPatch[O_O2_LEVEL] = 83;
+    oldPatch[O_O2_SEMI] = 31; oldPatch[O_O2_DETUNE] = 70;
+    oldPatch[O_SUB_WAVE] = 1; oldPatch[O_SUB_LEVEL] = 44;
+    oldPatch[O_NOISE] = 17; oldPatch[O_PW] = 99;
+    oldPatch[O_FINE] = 70; oldPatch[O_GLIDE] = 23;
+    oldPatch[O_AMP_A] = 7; oldPatch[O_AMP_D] = 61; oldPatch[O_AMP_S] = 88; oldPatch[O_AMP_R] = 45;
+    oldPatch[O_FIL_TYPE] = 1; oldPatch[O_CUTOFF] = 97; oldPatch[O_RESO] = 66;
+    oldPatch[O_FEG_AMT] = 90; oldPatch[O_KEYTRK] = 33;
+    oldPatch[O_FEG_A] = 3; oldPatch[O_FEG_D] = 55; oldPatch[O_FEG_S] = 21; oldPatch[O_FEG_R] = 39;
+    oldPatch[O_LFO_WAVE] = 3; oldPatch[O_LFO_RATE] = 76; oldPatch[O_LFO_AMT] = 29;
+    oldPatch[O_LFO_DEST] = 1; oldPatch[O_LFO_SYNC] = 1;
+    oldPatch[O_VOICE_MODE] = 1; oldPatch[O_VELO_AMT] = 64; oldPatch[O_DRIVE] = 52;
+    oldPatch[O_LEVEL] = 101; oldPatch[O_SEND_DLY] = 27; oldPatch[O_SEND_REV] = 38;
+    oldPatch[O_BEND] = 5;
+
+    uint8_t oldKit[kOldDrums][kOldDrumParams];
+    for (int l = 0; l < kOldDrums; ++l)
+        for (int d = 0; d < kOldDrumParams; ++d)
+            oldKit[l][d] = (uint8_t)(10 + l * 8 + d);
+    const uint8_t oldDly = 31, oldRev = 47;
+
+    const int n = writeV2Blob(src, oldPatch, oldKit, oldDly, oldRev, buf);
     Project got;
-    CHECK(projectDeserialize(got, buf, n), "a v1 project no longer loads");
-    CHECK(strcmp(got.name, "OLDSONG") == 0, "v1 name lost: %s", got.name);
-    CHECK(got.bpm == 143, "v1 tempo lost: %d", got.bpm);
+    CHECK(projectDeserialize(got, buf, n), "a v2 project no longer loads");
+    CHECK(strcmp(got.name, "OLDSONG") == 0, "v2 name lost: %s", got.name);
+    CHECK(got.bpm == 143, "v2 tempo lost: %d", got.bpm);
+
+    // Steps and melodic tracks come back untouched.
     for (int i = 0; i < kPatternCount; ++i) {
-        CHECK(got.pat[i].length == src.pat[i].length, "v1 pattern %d length lost", i);
+        CHECK(got.pat[i].length == src.pat[i].length, "v2 pattern %d length lost", i);
         for (int t = 0; t < kMelTracks; ++t)
-            for (int st = 0; st < kMaxSteps; ++st) {
+            for (int st = 0; st < kMaxSteps; ++st)
                 CHECK(got.pat[i].mel[t][st].note == src.pat[i].mel[t][st].note,
-                      "v1 pattern %d note %d lost", i, st);
-                CHECK(got.pat[i].mel[t][st].chord == CHORD_OFF,
-                      "v1 step got chord %d, expected OFF", got.pat[i].mel[t][st].chord);
-            }
-        CHECK(memcmp(got.pat[i].drum[DL_KICK], src.pat[i].drum[DL_KICK], kMaxSteps) == 0,
-              "v1 pattern %d kick lane lost", i);
+                      "v2 pattern %d note %d lost", i, st);
     }
-    CHECK(memcmp(got.patch[0].p, src.patch[0].p, P_COUNT) == 0, "v1 patch lost");
-    CHECK(memcmp(got.kit.p, src.kit.p, sizeof(src.kit.p)) == 0, "v1 kit lost");
+
+    // The drum lanes must be remapped, not copied by index. v2 lane 4 was
+    // CLAP, which is lane 6 now; copying by index would silently turn every
+    // saved clap into a ride.
+    static const uint8_t expectLane[kOldDrums] = {
+        DL_KICK, DL_SNARE, DL_CHH, DL_OHH, DL_CLAP, DL_TOM, DL_RIM, DL_CRASH, DL_PERC
+    };
+    for (int i = 0; i < kPatternCount; ++i)
+        for (int l = 0; l < kOldDrums; ++l)
+            CHECK(memcmp(got.pat[i].drum[expectLane[l]], src.pat[i].drum[l], kMaxSteps) == 0,
+                  "v2 pattern %d lane %d did not land on %s", i, l, kDrumNames[expectLane[l]]);
+    // The three lanes v2 never had must come back empty rather than filled
+    // with somebody else's notes.
+    for (int i = 0; i < kPatternCount; ++i) {
+        static const uint8_t fresh[3] = {DL_RIDE, DL_COWBELL, DL_SHAKER};
+        for (int f = 0; f < 3; ++f)
+            for (int st = 0; st < kMaxSteps; ++st)
+                CHECK(got.pat[i].drum[fresh[f]][st] == 0,
+                      "new lane %s came back with data", kDrumNames[fresh[f]]);
+    }
+
+    // The patch converts: engine, then every parameter that still means the
+    // same thing, then the oscillator block.
+    const Patch& gp = got.patch[0];
+    CHECK(gp.engine() == ENG_ANALOG, "v2 engine 0 should map to ANALOG, got %d", gp.engine());
+    CHECK(gp.get(P_CUTOFF) == 97, "v2 cutoff lost: %d", gp.get(P_CUTOFF));
+    CHECK(gp.get(P_RESO) == 66, "v2 reso lost: %d", gp.get(P_RESO));
+    CHECK(gp.get(P_AMP_A) == 7 && gp.get(P_AMP_D) == 61 &&
+          gp.get(P_AMP_S) == 88 && gp.get(P_AMP_R) == 45, "v2 amp envelope lost");
+    CHECK(gp.get(P_FEG_D) == 55, "v2 filter envelope lost");
+    CHECK(gp.get(P_LFO_RATE) == 76 && gp.get(P_LFO_DEST) == 1, "v2 LFO lost");
+    CHECK(gp.get(P_VOICE_MODE) == 1, "v2 voice mode lost");
+    CHECK(gp.get(P_DRIVE) == 52 && gp.get(P_LEVEL) == 101, "v2 output stage lost");
+    CHECK(gp.get(P_SEND_DLY) == 27 && gp.get(P_SEND_REV) == 38, "v2 sends lost");
+    CHECK(gp.get(P_BEND) == 5, "v2 bend lost");
+    CHECK(gp.get(PA_O1_WAVE) == 2 && gp.get(PA_O1_LEVEL) == 111, "v2 osc 1 lost");
+    CHECK(gp.get(PA_O2_WAVE) == 1 && gp.get(PA_O2_LEVEL) == 83, "v2 osc 2 lost");
+    CHECK(gp.get(PA_SUB_LEVEL) == 44 && gp.get(PA_NOISE) == 17, "v2 sub/noise lost");
+    CHECK(gp.get(PA_PW) == 99, "v2 pulse width lost");
+
+    // The kit's four old parameters land on the same four lanes, remapped,
+    // and the kit-wide sends become each lane's own send.
+    for (int l = 0; l < kOldDrums; ++l)
+        for (int d = 0; d < kOldDrumParams; ++d)
+            CHECK(got.kit.get(expectLane[l], (uint8_t)d) == oldKit[l][d],
+                  "v2 kit lane %d param %d lost", l, d);
+    for (int l = 0; l < DL_COUNT; ++l) {
+        CHECK(got.kit.get((uint8_t)l, DP_DLY) == oldDly, "v2 kit delay send lost on lane %d", l);
+        CHECK(got.kit.get((uint8_t)l, DP_REV) == oldRev, "v2 kit reverb send lost on lane %d", l);
+        for (int m = 0; m < DM_COUNT; ++m)
+            CHECK(got.kit.macro((uint8_t)l, (uint8_t)m) == kMacroNeutral,
+                  "imported kit should start with neutral macros");
+    }
 }
 
 // ---------------------------------------------------------------------------

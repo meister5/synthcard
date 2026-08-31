@@ -47,9 +47,9 @@ static void sanitize(const char* in, char* out, int cap) {
     out[j] = 0;
 }
 
-static uint8_t s_buf[kProjectBufSize];
-
-bool projectSave(const Project& p, const char* name, char* err, int errLen) {
+bool projectSave(const Project& p, const char* name, void* scratch, char* err, int errLen) {
+    if (!scratch) { snprintf(err, errLen, "No scratch buffer."); return false; }
+    uint8_t* s_buf = static_cast<uint8_t*>(scratch);
     char clean[kNameLen];
     sanitize(name, clean, kNameLen);
     int n = projectSerialize(p, s_buf, kProjectBufSize);
@@ -72,7 +72,9 @@ bool projectSave(const Project& p, const char* name, char* err, int errLen) {
     return true;
 }
 
-bool projectLoad(Project& p, const char* name, char* err, int errLen) {
+bool projectLoad(Project& p, const char* name, void* scratch, char* err, int errLen) {
+    if (!scratch) { snprintf(err, errLen, "No scratch buffer."); return false; }
+    uint8_t* s_buf = static_cast<uint8_t*>(scratch);
     char clean[kNameLen];
     sanitize(name, clean, kNameLen);
     if (!mount()) { snprintf(err, errLen, "No SD card."); return false; }

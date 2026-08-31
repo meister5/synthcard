@@ -45,10 +45,12 @@ static void drawPlay(App& a, int, int y0, int w, int h) {
 
     textAt(g, 4, y0 + 15, pt.name, C_TEXT, &fonts::Font2);
 
+    // The engine, its own first parameter (whatever that means for this
+    // engine) and the filter - a one-line summary that stays true for all six.
     char oscTxt[16], filTxt[16];
-    formatParam(pt, P_O1_WAVE, oscTxt, sizeof(oscTxt));
+    formatParam(pt, P_ENG_BASE, oscTxt, sizeof(oscTxt));
     formatParam(pt, P_FIL_TYPE, filTxt, sizeof(filTxt));
-    snprintf(buf, sizeof(buf), "%s  %s  %s", kSynthParamInfo[P_ENGINE].list[pt.get(P_ENGINE)], oscTxt, filTxt);
+    snprintf(buf, sizeof(buf), "%s  %s  %s", kEngineNames[pt.engine()], oscTxt, filTxt);
     textAt(g, 4, y0 + 34, buf, C_DIM, &fonts::Font0);
 
     // two live macros: cutoff and resonance
@@ -141,6 +143,17 @@ static bool actPlay(App& a, const Action& act) {
 // ===========================================================================
 // DRUM
 // ===========================================================================
+// The lane grid scrolls: twelve lanes will not fit the body at a readable row
+// height, so eight are shown in a window that follows the cursor.
+static constexpr int kDrumVisible = 8;
+
+// One cursor spans the macros and the detail parameters: 0..2 are PUNCH /
+// TONE / SPACE, 3..10 are the eight per-lane parameters. Walking off the end
+// of the macros lands on the detail page, which is the same wrap the SOUND
+// screen uses, so paging is never something you have to think about.
+static inline bool drumCursorIsMacro(uint8_t c) { return c < DM_COUNT; }
+static inline uint8_t drumCursorParam(uint8_t c) { return (uint8_t)(c - DM_COUNT); }
+
 static void drawDrum(App& a, int, int y0, int w, int h) {
     M5Canvas& g = uiCanvas();
     Pattern& p = curPattern(a);
@@ -153,12 +166,22 @@ static void drawDrum(App& a, int, int y0, int w, int h) {
     const int laneH = 10, gx = 26, cellW = 13;
     const int playStep = s.playing() ? s.step() : -1;
 
-    for (int l = 0; l < DL_COUNT; ++l) {
-        int ly = y0 + l * laneH;
+    // Keep the selected lane inside the window without letting the window
+    // run off either end of the list.
+    int top = (int)a.drumLane - kDrumVisible / 2;
+    if (top > DL_COUNT - kDrumVisible) top = DL_COUNT - kDrumVisible;
+    if (top < 0) top = 0;
+
+    for (int row = 0; row < kDrumVisible; ++row) {
+        const int l = top + row;
+        int ly = y0 + row * laneH;
         bool sel = l == a.drumLane;
         bool mute = (p.muteDrum >> l) & 1;
         if (sel) g.fillRect(0, ly, w, laneH - 1, C_PANEL);
         textAt(g, 2, ly + 1, kDrumShort[l], mute ? C_FAINT : (sel ? C_ACCENT : C_DIM), &fonts::Font0);
+        // A lane that chokes others is marked, so the behaviour is visible
+        // rather than a surprise when the open hat cuts off.
+        if (kChokeGroup[l]) textAt(g, 20, ly + 1, "\xB7", C_FAINT, &fonts::Font0);
         for (int i = 0; i < 16; ++i) {
             int st = base + i;
             int cx = gx + i * cellW;
@@ -171,19 +194,39 @@ static void drawDrum(App& a, int, int y0, int w, int h) {
             if (st == playStep) g.drawRect(cx - 1, ly - 1, cellW, laneH, C_TEXT);
         }
     }
+    // Scroll markers, so it is obvious there are lanes off-screen.
+    if (top > 0) textAt(g, 18, y0, "\x18", C_FAINT, &fonts::Font0);
+    if (top + kDrumVisible < DL_COUNT)
+        textAt(g, 18, y0 + (kDrumVisible - 1) * laneH + 1, "\x19", C_FAINT, &fonts::Font0);
 
-    // lane parameter strip
-    const int py = y0 + DL_COUNT * laneH + 2;
+    const int py = y0 + kDrumVisible * laneH + 1;
     char buf[40];
-    snprintf(buf, sizeof(buf), "%s", kDrumNames[a.drumLane]);
-    textAt(g, 2, py, buf, C_TEXT, &fonts::Font0);
-    for (int i = 0; i < DP_COUNT; ++i) {
-        int px = 58 + i * 46;
-        bool sel = i == a.drumParam;
-        uint8_t v = a.proj.kit.get(a.drumLane, (uint8_t)i);
-        snprintf(buf, sizeof(buf), "%s", kDrumParamNames[i]);
-        textAt(g, px, py, buf, sel ? C_ACCENT : C_FAINT, &fonts::Font0);
-        bar(g, px, py + 9, 40, 4, v * (1.0f / 127.0f), sel ? C_ACCENT : C_ACC2, C_FAINT);
+    const DrumKit& kit = a.proj.kit;
+    textAt(g, 2, py, kDrumNames[a.drumLane], C_TEXT, &fonts::Font0);
+
+    if (drumCursorIsMacro(a.drumParam)) {
+        textAt(g, 2, py + 11, kit.name, C_FAINT, &fonts::Font0);
+        for (int i = 0; i < DM_COUNT; ++i) {
+            const int px = 62 + i * 60;
+            const bool sel = i == a.drumParam;
+            const int v = (int)kit.macro(a.drumLane, (uint8_t)i) - kMacroNeutral;
+            textAt(g, px, py, kDrumMacroNames[i], sel ? C_ACCENT : C_FAINT, &fonts::Font0);
+            snprintf(buf, sizeof(buf), "%+d", v * 100 / 64);
+            textAt(g, px + 54, py, buf, sel ? C_TEXT : C_FAINT, &fonts::Font0,
+                   textdatum_t::top_right);
+            barBipolar(g, px, py + 10, 54, 4, (float)v / 64.0f,
+                       sel ? C_ACCENT : C_ACC2, C_FAINT);
+        }
+    } else {
+        // Eight parameters as two rows of four.
+        for (int i = 0; i < DP_COUNT; ++i) {
+            const int col = i % 4, row = i / 4;
+            const int px = 62 + col * 45, pyy = py + row * 12;
+            const bool sel = (uint8_t)i == drumCursorParam(a.drumParam);
+            const uint8_t v = kit.get(a.drumLane, (uint8_t)i);
+            textAt(g, px, pyy, kDrumParamNames[i], sel ? C_ACCENT : C_FAINT, &fonts::Font0);
+            bar(g, px, pyy + 8, 40, 3, v * (1.0f / 127.0f), sel ? C_ACCENT : C_ACC2, C_FAINT);
+        }
     }
 }
 
@@ -191,6 +234,7 @@ static bool actDrum(App& a, const Action& act) {
     Pattern& p = curPattern(a);
     const int len = patternLength(a.proj, a.engine.seq().currentPattern());
     const int pages = (len + 15) / 16;
+    DrumKit& kit = a.proj.kit;
     switch (act.act) {
         case A_STEP: {
             const int st = (a.drumPage % (pages ? pages : 1)) * 16 + act.arg;
@@ -204,15 +248,27 @@ static bool actDrum(App& a, const Action& act) {
         case A_DOWN: a.drumLane = (uint8_t)((a.drumLane + 1) % DL_COUNT); return true;
         case A_LEFT: if (pages > 1) a.drumPage = (uint8_t)((a.drumPage + pages - 1) % pages); return true;
         case A_RIGHT:if (pages > 1) a.drumPage = (uint8_t)((a.drumPage + 1) % pages); return true;
-        case A_CURSOR_PREV: a.drumParam = (uint8_t)((a.drumParam + DP_COUNT - 1) % DP_COUNT); return true;
-        case A_CURSOR_NEXT: a.drumParam = (uint8_t)((a.drumParam + 1) % DP_COUNT); return true;
+        case A_CURSOR_PREV:
+            a.drumParam = (uint8_t)((a.drumParam + kDrumCursorCount - 1) % kDrumCursorCount);
+            return true;
+        case A_CURSOR_NEXT:
+            a.drumParam = (uint8_t)((a.drumParam + 1) % kDrumCursorCount);
+            return true;
         case A_VALUE_DOWN: case A_VALUE_UP: {
-            int d = (act.act == A_VALUE_UP ? 1 : -1) * (act.arg > 1 ? 10 : 2);
-            a.proj.kit.set(a.drumLane, a.drumParam, a.proj.kit.get(a.drumLane, a.drumParam) + d);
+            const int d = (act.act == A_VALUE_UP ? 1 : -1) * (act.arg > 1 ? 10 : 2);
             char v[16];
-            snprintf(v, sizeof(v), "%d%%", a.proj.kit.get(a.drumLane, a.drumParam) * 100 / 127);
-            showParam(a, kDrumParamNames[a.drumParam], v,
-                      a.proj.kit.get(a.drumLane, a.drumParam) / 127.0f);
+            if (drumCursorIsMacro(a.drumParam)) {
+                const uint8_t mi = a.drumParam;
+                kit.setMacro(a.drumLane, mi, kit.macro(a.drumLane, mi) + d);
+                const int off = (int)kit.macro(a.drumLane, mi) - kMacroNeutral;
+                snprintf(v, sizeof(v), "%+d", off * 100 / 64);
+                showParam(a, kDrumMacroNames[mi], v, kit.macro(a.drumLane, mi) / 127.0f);
+            } else {
+                const uint8_t par = drumCursorParam(a.drumParam);
+                kit.set(a.drumLane, par, kit.get(a.drumLane, par) + d);
+                snprintf(v, sizeof(v), "%d%%", kit.get(a.drumLane, par) * 100 / 127);
+                showParam(a, kDrumParamNames[par], v, kit.get(a.drumLane, par) / 127.0f);
+            }
             a.engine.drumHit(a.drumLane, 100);
             return true;
         }
@@ -429,12 +485,14 @@ static void drawSound(App& a, int, int y0, int w, int h) {
     M5Canvas& g = uiCanvas();
     const uint8_t tr = a.engine.liveTrack();
     Patch& pt = a.proj.patch[tr];
-    const ParamPage& pg = kSynthPages[a.soundPage % kSynthPageCount];
+    const uint8_t eng = pt.engine();
+    const uint8_t nPages = synthPageCount(eng);
+    const ParamPage& pg = synthPages(eng)[a.soundPage % nPages];
 
     trackBadge(g, 2, y0 + 1, tr, false);
     textAt(g, 40, y0 + 3, pt.name, C_TEXT, &fonts::Font0);
     char buf[40];
-    snprintf(buf, sizeof(buf), "%s %d/%d", pg.name, (a.soundPage % kSynthPageCount) + 1, kSynthPageCount);
+    snprintf(buf, sizeof(buf), "%s %d/%d", pg.name, (a.soundPage % nPages) + 1, nPages);
     textAt(g, w - 3, y0 + 3, buf, C_ACCENT, &fonts::Font0, textdatum_t::top_right);
     g.drawFastHLine(0, y0 + 13, w, C_GRID);
 
@@ -443,7 +501,7 @@ static void drawSound(App& a, int, int y0, int w, int h) {
         int x = 6 + col * 118, y = y0 + 19 + row * 27;
         if (i >= pg.n) continue;
         uint8_t id = pg.p[i];
-        const ParamInfo& in = kSynthParamInfo[id];
+        const ParamInfo& in = paramInfo(eng, id);
         formatParam(pt, id, buf, sizeof(buf));
         paramRow(g, x, y, 104, in.name, buf, pt.norm(id), in.disp == D_BIPOLAR || in.disp == D_CENTS,
                  i == a.soundCursor);
@@ -453,26 +511,54 @@ static void drawSound(App& a, int, int y0, int w, int h) {
 static bool actSound(App& a, const Action& act) {
     const uint8_t tr = a.engine.liveTrack();
     Patch& pt = a.proj.patch[tr];
-    const ParamPage& pg = kSynthPages[a.soundPage % kSynthPageCount];
+    const uint8_t eng = pt.engine();
+    const uint8_t nPages = synthPageCount(eng);
+    const ParamPage& pg = synthPages(eng)[a.soundPage % nPages];
     switch (act.act) {
-        case A_CURSOR_PREV: a.soundCursor = (uint8_t)((a.soundCursor + pg.n - 1) % pg.n); return true;
-        case A_CURSOR_NEXT: a.soundCursor = (uint8_t)((a.soundCursor + 1) % pg.n); return true;
+        // The cursor wraps across page boundaries: past the last parameter of
+        // a page you land on the first of the next one. That is what removes
+        // the need to interleave two different navigation gestures while
+        // editing a sound. The page keys still work as a shortcut.
+        case A_CURSOR_PREV:
+            if (a.soundCursor == 0) {
+                a.soundPage = (uint8_t)((a.soundPage + nPages - 1) % nPages);
+                const uint8_t pn = synthPages(eng)[a.soundPage].n;
+                a.soundCursor = (uint8_t)(pn ? pn - 1 : 0);
+            } else --a.soundCursor;
+            return true;
+        case A_CURSOR_NEXT:
+            if (a.soundCursor + 1 >= pg.n) {
+                a.soundPage = (uint8_t)((a.soundPage + 1) % nPages);
+                a.soundCursor = 0;
+            } else ++a.soundCursor;
+            return true;
         case A_LEFT:
-            a.soundPage = (uint8_t)((a.soundPage + kSynthPageCount - 1) % kSynthPageCount);
+            a.soundPage = (uint8_t)((a.soundPage + nPages - 1) % nPages);
             a.soundCursor = 0; return true;
         case A_RIGHT:
-            a.soundPage = (uint8_t)((a.soundPage + 1) % kSynthPageCount);
+            a.soundPage = (uint8_t)((a.soundPage + 1) % nPages);
             a.soundCursor = 0; return true;
         case A_UP:   a.engine.setLiveTrack(0); return true;
         case A_DOWN: a.engine.setLiveTrack(1); return true;
         case A_STEP:
-            if (act.arg < kSynthPageCount) { a.soundPage = (uint8_t)act.arg; a.soundCursor = 0; }
+            if (act.arg < nPages) { a.soundPage = (uint8_t)act.arg; a.soundCursor = 0; }
             return true;
         case A_VALUE_DOWN: case A_VALUE_UP: {
             uint8_t id = pg.p[a.soundCursor % pg.n];
-            const ParamInfo& in = kSynthParamInfo[id];
+            const ParamInfo& in = paramInfo(eng, id);
+            if (in.max == 0) return true;
             int step = (in.disp == D_LIST) ? 1 : (act.arg > 1 ? 10 : 2);
-            pt.set(id, pt.get(id) + (act.act == A_VALUE_UP ? step : -step));
+            const int next = pt.get(id) + (act.act == A_VALUE_UP ? step : -step);
+            // Changing the engine reshapes the overlay block, so it goes
+            // through setEngine() and the cursor returns to page one.
+            if (id == P_ENGINE) {
+                pt.setEngine((uint8_t)clampi(next, 0, ENG_COUNT - 1));
+                a.soundPage = 0; a.soundCursor = 0;
+                showParam(a, "ENGINE", kEngineNames[pt.engine()],
+                          (float)pt.engine() / (float)(ENG_COUNT - 1));
+                return true;
+            }
+            pt.set(id, next);
             char v[20];
             formatParam(pt, id, v, sizeof(v));
             showParam(a, in.name, v, pt.norm(id));
@@ -658,7 +744,8 @@ static bool actFile(App& a, const Action& act) {
             switch (a.fileAction) {
                 case 1: {   // SAVE
                     a.engine.suspendAudio();
-                    bool ok = projectSave(a.proj, a.proj.name, err, sizeof(err));
+                    bool ok = projectSave(a.proj, a.proj.name, &a.undoBuf, err, sizeof(err));
+                    a.undoValid = false;
                     a.engine.resumeAudio();
                     if (ok) {
                         strncpy(a.settings.lastProject, a.proj.name, kNameLen - 1);
@@ -675,7 +762,8 @@ static bool actFile(App& a, const Action& act) {
                     // only has an 8 KB stack.
                     static Project tmp;
                     a.engine.suspendAudio();
-                    bool ok = projectLoad(tmp, a.fileNames[a.fileCursor], err, sizeof(err));
+                    bool ok = projectLoad(tmp, a.fileNames[a.fileCursor], &a.undoBuf, err, sizeof(err));
+                    a.undoValid = false;
                     if (ok) a.proj = tmp;
                     a.engine.resumeAudio();
                     if (ok) {
@@ -860,12 +948,13 @@ static bool actSys(App& a, const Action& act) {
 // over from another screen.
 static void clampCursors(App& a) {
     a.drumLane    %= DL_COUNT;
-    a.drumParam   %= DP_COUNT;
+    a.drumParam   %= kDrumCursorCount;
     a.seqTrack    %= kMelTracks;
     a.seqField    %= kSeqFieldCount;
     a.seqStep     %= 16;
-    a.soundPage   %= kSynthPageCount;
-    const uint8_t pn = kSynthPages[a.soundPage].n;
+    const uint8_t eng = a.proj.patch[a.engine.liveTrack() % kMelTracks].engine();
+    a.soundPage   %= synthPageCount(eng);
+    const uint8_t pn = synthPages(eng)[a.soundPage].n;
     a.soundCursor = pn ? (uint8_t)(a.soundCursor % pn) : 0;
     a.fxCursor    %= FX_COUNT;
     a.sysCursor   %= SR_COUNT;

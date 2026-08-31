@@ -47,8 +47,8 @@ namespace synth {
 void settingsLoad(Settings&) {}
 void settingsSave(const Settings&) {}
 bool sdAvailable() { return false; }
-bool projectSave(const Project&, const char*, char* err, int n) { snprintf(err, n, "No SD card."); return false; }
-bool projectLoad(Project&, const char*, char* err, int n) { snprintf(err, n, "No SD card."); return false; }
+bool projectSave(const Project&, const char*, void*, char* err, int n) { snprintf(err, n, "No SD card."); return false; }
+bool projectLoad(Project&, const char*, void*, char* err, int n) { snprintf(err, n, "No SD card."); return false; }
 bool projectDelete(const char*, char* err, int n) { snprintf(err, n, "No SD card."); return false; }
 int  projectList(char out[][kNameLen], int maxCount) {
     // Pretend a card with a few projects so the FILE browser is exercised.

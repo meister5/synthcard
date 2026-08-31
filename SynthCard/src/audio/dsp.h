@@ -12,6 +12,10 @@ namespace synth {
 // per sample for the whole engine.
 constexpr float kSampleRate = 32000.0f;
 constexpr int   kBlockSize  = 128;          // 4 ms per block
+// Control-rate chunk: filter/LFO/operator coefficients are refreshed every 16
+// samples (0.5 ms). Fast enough that a 20 ms envelope is smooth, cheap enough
+// that the transcendentals cost almost nothing per sample.
+constexpr int   kCtrlChunk  = 16;
 constexpr float kInvSampleRate = 1.0f / kSampleRate;
 
 constexpr float kPi  = 3.14159265358979f;
@@ -67,6 +71,100 @@ struct Rng {
     inline float bipolar() { return (float)(int32_t)next() * (1.0f / 2147483648.0f); }
     inline float unipolar() { return (float)next() * (1.0f / 4294967296.0f); }
     inline uint32_t below(uint32_t n) { return n ? next() % n : 0; }
+};
+
+// 2^x for |x| within a few octaves. Two Taylor terms, ~0.1 cent of error over
+// +-2 octaves, and roughly 20x faster than powf() on the LX7. The engines call
+// this once per control chunk per voice, where powf() showed up in profiling.
+inline float fastExp2(float x) {
+    int   i = (int)(x + (x < 0.0f ? -0.5f : 0.5f));   // nearest integer octave
+    float f = x - (float)i;                           // remainder in [-0.5,0.5]
+    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * 0.0555041f));
+    // Scale by 2^i without a loop: bias the float exponent directly.
+    union { float f; uint32_t u; } s;
+    s.u = (uint32_t)((127 + i) << 23);
+    return p * s.f;
+}
+
+// Note number -> Hz via fastExp2. Used per note-on and per control chunk.
+inline float noteToHzFast(float note) { return 440.0f * fastExp2((note - 69.0f) * (1.0f / 12.0f)); }
+
+// ---- shared voice primitives --------------------------------------------
+// These live here rather than in voice.h because the engines and the drum
+// families need them too, and a drum lane should not have to include a
+// polyphonic synth voice to get a filter.
+
+// Linear attack, exponential decay/release. Click-free and cheap.
+class Env {
+public:
+    enum Stage : uint8_t { E_IDLE, E_ATK, E_DEC, E_SUS, E_REL };  // DEC is an Arduino macro
+    // rate lets a control-rate envelope (stepped once per control chunk)
+    // use the same wall-clock times as a per-sample one.
+    void configure(float aMs, float dMs, float sus, float rMs, float rate = kSampleRate);
+    void gate(bool on);
+    void reset() { stage_ = E_IDLE; level_ = 0.0f; }
+    inline float process() {
+        switch (stage_) {
+            case E_ATK:
+                level_ += atkInc_;
+                if (level_ >= 1.0f) { level_ = 1.0f; stage_ = E_DEC; }
+                break;
+            case E_DEC:
+                level_ += (sus_ - level_) * decCoef_;
+                if (level_ - sus_ < 0.001f && sus_ - level_ < 0.001f) { level_ = sus_; stage_ = E_SUS; }
+                break;
+            case E_SUS: level_ = sus_; break;
+            case E_REL:
+                level_ -= level_ * relCoef_;
+                if (level_ < 0.0004f) { level_ = 0.0f; stage_ = E_IDLE; }
+                break;
+            default: level_ = 0.0f; break;
+        }
+        return level_;
+    }
+    inline bool  idle()  const { return stage_ == E_IDLE; }
+    inline bool  releasing() const { return stage_ == E_REL; }
+    inline float level() const { return level_; }
+private:
+    Stage stage_ = E_IDLE;
+    float level_ = 0.0f, sus_ = 1.0f;
+    float atkInc_ = 1.0f, decCoef_ = 0.01f, relCoef_ = 0.01f;
+};
+
+// Cytomic / TPT state-variable filter. Stable up to Nyquist, one shared
+// topology for LP / HP / BP / notch.
+class SVF {
+public:
+    void reset() { ic1_ = ic2_ = 0.0f; }
+    void setCoeffs(float cutoffHz, float q);
+    inline float process(float in, uint8_t type) {
+        float v3 = in - ic2_;
+        float v1 = a1_ * ic1_ + a2_ * v3;
+        float v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
+        ic1_ = 2.0f * v1 - ic1_;
+        ic2_ = 2.0f * v2 - ic2_;
+        switch (type) {
+            case 1: return v2;                       // low
+            case 2: return in - k_ * v1 - v2;        // high
+            case 3: return v1;                       // band
+            case 4: return in - k_ * v1;             // notch (low + high)
+            default: return in;
+        }
+    }
+private:
+    float a1_ = 1.0f, a2_ = 0.0f, a3_ = 0.0f, k_ = 1.0f;
+    float ic1_ = 0.0f, ic2_ = 0.0f;
+};
+
+class Lfo {
+public:
+    void configure(uint8_t wave, float rateHz) { wave_ = wave; inc_ = rateHz * kInvSampleRate; }
+    void retrigger() { phase_ = 0.0f; }
+    float step();                       // called once per control chunk
+private:
+    uint8_t wave_ = 0;
+    float   phase_ = 0.0f, inc_ = 0.001f, sh_ = 0.0f;
+    Rng     rng_;
 };
 
 }  // namespace synth

@@ -97,7 +97,7 @@ int main() {
         app.drumLane = (uint8_t)rng.below(DL_COUNT + 2);
         app.drumPage = (uint8_t)rng.below(8);
         app.drumParam = (uint8_t)rng.below(DP_COUNT + 1);
-        app.soundPage = (uint8_t)rng.below(kSynthPageCount + 2);
+        app.soundPage = (uint8_t)rng.below(synthPageCount(app.proj.patch[0].engine()) + 2u);
         app.soundCursor = (uint8_t)rng.below(8);
         app.fxCursor = (uint8_t)rng.below(FX_COUNT + 2);
         app.songCursor = (uint8_t)rng.below(kSongSlots + 2);
@@ -150,7 +150,7 @@ int main() {
         loadPreset(app.proj.patch[0], i);
         loadPreset(app.proj.patch[1], (uint16_t)((i * 7) % kPresetCount));
         app.presetIndex[0] = i;
-        for (uint8_t pg = 0; pg < kSynthPageCount; ++pg) {
+        for (uint8_t pg = 0; pg < synthPageCount(app.proj.patch[0].engine()); ++pg) {
             app.soundPage = pg;
             for (uint8_t c = 0; c < 6; ++c) { app.soundCursor = c; ++g_run; uiDraw(app); }
         }

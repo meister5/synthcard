@@ -144,7 +144,8 @@ static void tapTempo(App& app) {
 static void doSave(App& app) {
     char err[48];
     app.engine.suspendAudio();
-    bool ok = projectSave(app.proj, app.proj.name, err, sizeof(err));
+    bool ok = projectSave(app.proj, app.proj.name, &app.undoBuf, err, sizeof(err));
+    app.undoValid = false;   // the save borrowed the undo buffer as scratch
     app.engine.resumeAudio();
     if (ok) {
         strncpy(app.settings.lastProject, app.proj.name, kNameLen - 1);

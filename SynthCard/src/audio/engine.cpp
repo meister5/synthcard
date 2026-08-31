@@ -108,6 +108,29 @@ int AudioEngine::allocVoice(uint8_t track, uint8_t note) {
     // Same note already sounding on this track -> retrigger it.
     for (int i = 0; i < maxVoices_; ++i)
         if (voices_[i].active() && vTrack_[i] == track && vNote_[i] == note) return i;
+    // Unison patches occupy several slots, so make room before taking one:
+    // a 4x supersaw gives two notes of polyphony rather than quietly asking
+    // the CPU for four times the work.
+    const uint8_t want = patchVoiceCost(pt);
+    for (int guard = 0; guard < kMaxVoices; ++guard) {
+        int used = 0;
+        for (int i = 0; i < maxVoices_; ++i) if (voices_[i].active()) used += voices_[i].cost();
+        if (used + want <= maxVoices_) break;
+        // Give up the quietest released voice, else the oldest.
+        int victim = -1; float quietest = 1e9f;
+        for (int i = 0; i < maxVoices_; ++i)
+            if (voices_[i].active() && voices_[i].released() && voices_[i].envLevel() < quietest)
+                { quietest = voices_[i].envLevel(); victim = i; }
+        if (victim < 0) {
+            uint32_t oldest = 0xFFFFFFFFu;
+            for (int i = 0; i < maxVoices_; ++i)
+                if (voices_[i].active() && voices_[i].age() < oldest)
+                    { oldest = voices_[i].age(); victim = i; }
+        }
+        if (victim < 0) break;
+        voices_[victim].kill();
+    }
+
     // Free voice.
     for (int i = 0; i < maxVoices_; ++i) if (!voices_[i].active()) return i;
     // Steal: quietest released voice, else oldest.
@@ -163,7 +186,9 @@ void AudioEngine::renderSegment(int offset, int n) {
         uint8_t t = vTrack_[i] < kMelTracks ? vTrack_[i] : 0;
         voices_[i].render(busMel_[t] + offset, n);
     }
-    drums_.render(busDrum_ + offset, n);
+    // Drum sends are per lane now, so the drum engine adds into the send
+    // buses itself rather than the mixer applying one kit-wide amount.
+    drums_.render(busDrum_ + offset, sendDly_ + offset, sendRev_ + offset, n);
 }
 
 void AudioEngine::adaptLoad(uint32_t us, int samples) {
@@ -188,6 +213,10 @@ void AudioEngine::renderBlock(int16_t* out, int n) {
 
     for (int t = 0; t < kMelTracks; ++t) memset(busMel_[t], 0, sizeof(float) * n);
     memset(busDrum_, 0, sizeof(float) * n);
+    // Cleared up front because the drum engine accumulates into these while
+    // the segment loop runs, before the mixer adds the melodic sends.
+    memset(sendDly_, 0, sizeof(float) * n);
+    memset(sendRev_, 0, sizeof(float) * n);
 
     int done = 0;
     while (done < n) {
@@ -204,12 +233,11 @@ void AudioEngine::renderBlock(int16_t* out, int n) {
 
     const float sd0 = proj_->patch[0].norm(P_SEND_DLY), sr0 = proj_->patch[0].norm(P_SEND_REV);
     const float sd1 = proj_->patch[1].norm(P_SEND_DLY), sr1 = proj_->patch[1].norm(P_SEND_REV);
-    const float sdD = proj_->kit.sendDly * (1.0f / 127.0f), srD = proj_->kit.sendRev * (1.0f / 127.0f);
     for (int i = 0; i < n; ++i) {
         float a = busMel_[0][i], b = busMel_[1][i], d = busDrum_[i];
-        mix_[i]     = a + b + d;
-        sendDly_[i] = a * sd0 + b * sd1 + d * sdD;
-        sendRev_[i] = a * sr0 + b * sr1 + d * srD;
+        mix_[i]      = a + b + d;
+        sendDly_[i] += a * sd0 + b * sd1;
+        sendRev_[i] += a * sr0 + b * sr1;
     }
     // Added after the send buses are built, so the click never smears into the
     // delay or reverb - it is a reference, not part of the track.
