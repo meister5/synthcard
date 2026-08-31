@@ -10,7 +10,9 @@
 namespace synth {
 
 enum Mode : uint8_t {
-    M_PLAY = 0, M_DRUM, M_SEQ, M_SOUND, M_FX, M_SONG, M_FILE, M_SYS, M_COUNT
+    // FILE and SYS are one screen with two pages: both are administration,
+    // and one fewer thing to walk past while looking for something else.
+    M_PLAY = 0, M_DRUM, M_SEQ, M_SOUND, M_FX, M_SONG, M_SETUP, M_COUNT
 };
 extern const char* const kModeNames[M_COUNT];
 
@@ -33,6 +35,7 @@ struct App {
     uint8_t seqTrack = 0, seqStep = 0, seqPage = 0, seqField = 0;
     uint8_t songCursor = 0, songField = 0;
     uint8_t fileCursor = 0, fileAction = 0;
+    uint8_t setupPage = 0;      // 0 = FILE, 1 = SYSTEM
     uint8_t sysCursor = 0;
 
     uint16_t presetIndex[kMelTracks] = {0, 5};
@@ -51,6 +54,15 @@ struct App {
     uint32_t toastUntil = 0;
     bool     toastError = false;
     bool     menuOpen = false, helpOpen = false;
+
+    // Live legend: how long the current modifier set has been held. A quick
+    // chord never reaches the threshold, so playing is never interrupted.
+    Mods     lastMods;
+    uint32_t modsSince = 0;
+
+    // First-run walkthrough.
+    bool     tourOpen = false;
+    uint8_t  tourStep = 0;
     uint8_t  menuCursor = 0;
     uint8_t  helpPage = 0;
 
@@ -91,6 +103,20 @@ void snapshotUndo(App& a);
 void uiBegin();
 void uiDrawBoot(App& a);
 void uiDraw(App& a);
+
+// --- live legend (ui/legend.cpp) -------------------------------------------
+// A modifier has to be held this long before the legend appears, so a fast
+// chord - how the keys are actually played - never triggers it.
+constexpr uint32_t kLegendHoldMs = 180;
+bool legendActive(const App& a, uint32_t now);
+void uiDrawLegend(App& a);
+
+// --- first-run tour (ui/tour.cpp) ------------------------------------------
+int  tourStepCount();
+void tourStart(App& a);
+void tourFinish(App& a);
+bool tourKey(App& a, uint8_t id, bool pressed);
+void uiDrawTour(App& a);
 
 // Per-screen draw + input, implemented in screens.cpp.
 int  uiMenuCount();

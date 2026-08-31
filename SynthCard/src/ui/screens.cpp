@@ -969,6 +969,7 @@ static void clampCursors(App& a) {
     a.sysCursor   %= SR_COUNT;
     a.songField   %= 2;
     a.fileAction  %= 5;
+    a.setupPage   %= 2;
     a.chordMode   %= CHORD_COUNT;
     a.menuCursor  %= (uint8_t)uiMenuCount();
     a.helpPage    %= (uint8_t)uiHelpPageCount();
@@ -985,6 +986,27 @@ static void clampCursors(App& a) {
     a.seqPage     %= (uint8_t)pages;
 }
 
+// SETUP is FILE and SYSTEM behind a two-tab header. Pressing SETUP's own mode
+// key again flips the tab, so the second page costs no extra binding.
+static void drawSetup(App& a, int x, int y, int w, int h) {
+    M5Canvas& g = uiCanvas();
+    static const char* const kTabs[2] = {"FILES", "SYSTEM"};
+    const int tabH = 11;
+    g.fillRect(0, y, w, tabH, C_PANEL);
+    for (int i = 0; i < 2; ++i) {
+        const bool sel = (a.setupPage % 2) == i;
+        const int tx = 4 + i * 56;
+        if (sel) g.fillRect(tx - 3, y, 54, tabH, C_PANEL2);
+        textAt(g, tx, y + 2, kTabs[i], sel ? C_ACCENT : C_FAINT, &fonts::Font0);
+    }
+    textAt(g, w - 3, y + 2, "FN+7 SWITCHES", C_FAINT, &fonts::Font0, textdatum_t::top_right);
+    g.drawFastHLine(0, y + tabH, w, C_GRID);
+
+    const int by = y + tabH + 1, bh = h - tabH - 1;
+    if (a.setupPage % 2 == 0) drawFile(a, x, by, w, bh);
+    else                      drawSys(a, x, by, w, bh);
+}
+
 void screenDraw(App& a, int x, int y, int w, int h) {
     clampCursors(a);
     switch (a.mode) {
@@ -994,8 +1016,7 @@ void screenDraw(App& a, int x, int y, int w, int h) {
         case M_SOUND: drawSound(a, x, y, w, h); break;
         case M_FX:    drawFx(a, x, y, w, h); break;
         case M_SONG:  drawSong(a, x, y, w, h); break;
-        case M_FILE:  drawFile(a, x, y, w, h); break;
-        default:      drawSys(a, x, y, w, h); break;
+        default:      drawSetup(a, x, y, w, h); break;
     }
 }
 
@@ -1012,8 +1033,7 @@ bool screenAction(App& a, const Action& act) {
         case M_SOUND: return actSound(a, e);
         case M_FX:    return actFx(a, e);
         case M_SONG:  return actSong(a, e);
-        case M_FILE:  return actFile(a, e);
-        default:      return actSys(a, e);
+        default:      return a.setupPage == 0 ? actFile(a, e) : actSys(a, e);
     }
 }
 
@@ -1025,8 +1045,8 @@ const char* screenHint(const App& a) {
         case M_SOUND: return "OP PARAM   [] VALUE   F/K PRESET   ` HELP";
         case M_FX:    return "OP PARAM   [] VALUE   ` HELP";
         case M_SONG:  return "FN+;. SLOT   [] VALUE   ` HELP";
-        case M_FILE:  return "FN+,/ ACTION   TYPE TO RENAME   ` HELP";
-        default:      return "FN+;. ROW   [] VALUE   ` HELP";
+        default:      return a.setupPage == 0 ? "FN+,/ ACTION   TYPE TO RENAME   FN+7 SYSTEM"
+                                              : "FN+;. ROW   [] VALUE   FN+7 FILES";
     }
 }
 

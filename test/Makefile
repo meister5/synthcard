@@ -47,6 +47,8 @@ UI_SOURCES := ui_tests.cpp host_stubs.cpp \
               $(SRC_DIR)/app.cpp \
               $(SRC_DIR)/ui/ui.cpp \
               $(SRC_DIR)/ui/screens.cpp \
+              $(SRC_DIR)/ui/legend.cpp \
+              $(SRC_DIR)/ui/tour.cpp \
               $(SRC_DIR)/input/keys.cpp \
               $(SRC_DIR)/audio/engine.cpp \
               $(CORE)

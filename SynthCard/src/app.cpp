@@ -186,7 +186,17 @@ static bool handleGlobal(App& app, const Action& act) {
             return true;
         case A_MODE_NEXT: app.mode = (Mode)((app.mode + 1) % M_COUNT); return true;
         case A_MODE_PREV: app.mode = (Mode)((app.mode + M_COUNT - 1) % M_COUNT); return true;
-        case A_MODE_JUMP: app.mode = (Mode)(act.arg % M_COUNT); return true;
+        case A_MODE_JUMP: {
+            // The number row offers eight jumps but there are seven modes.
+            // Wrapping would send FN+8 to PLAY, which is worse than nothing.
+            if (act.arg < 0 || act.arg >= M_COUNT) return true;
+            const Mode want = (Mode)act.arg;
+            // Pressing SETUP's own key again flips between its two pages, so
+            // the second page needs no key of its own.
+            if (want == M_SETUP && app.mode == M_SETUP) app.setupPage ^= 1;
+            app.mode = want;
+            return true;
+        }
         case A_MENU: app.menuOpen = !app.menuOpen; app.menuCursor = 0; return true;
         case A_HELP: app.helpOpen = !app.helpOpen; return true;
         case A_TAP_TEMPO: tapTempo(app); return true;
@@ -287,7 +297,7 @@ static bool handleGlobal(App& app, const Action& act) {
             return true;
         }
         case A_SAVE: doSave(app); return true;
-        case A_LOAD: app.mode = M_FILE; app.fileAction = 2; refreshFileList(app); return true;
+        case A_LOAD: app.mode = M_SETUP; app.setupPage = 0; app.fileAction = 2; refreshFileList(app); return true;
         default: return false;
     }
 }
@@ -326,7 +336,7 @@ static void menuActivate(App& app) {
         case 1: app.engine.post(EV_PANIC); app.proj.reset(); applyPreset(app, 0, 0);
                 applyPreset(app, 1, 5); app.menuOpen = false; showToast(app, "NEW PROJECT"); break;
         case 2: app.menuOpen = false; doSave(app); break;
-        case 3: app.menuOpen = false; app.mode = M_FILE; app.fileAction = 2; refreshFileList(app); break;
+        case 3: app.menuOpen = false; app.mode = M_SETUP; app.setupPage = 0; app.fileAction = 2; refreshFileList(app); break;
         case 4: randomDrums(app.proj.pat[s.currentPattern()], app.rng, 65); showToast(app, "RANDOM BEAT"); break;
         case 5: randomBass(app.proj.pat[s.currentPattern()], 1, app.rng, app.proj.root,
                            app.proj.scale ? app.proj.scale : 4, (uint8_t)clampi(app.proj.octave - 1, 1, 7));
@@ -385,9 +395,12 @@ static void handleBootKey(App& app, const KeyEvent& e) {
             case BOOT_JAM: quickJamSetup(app); break;
             case BOOT_NEW: app.proj.reset(); applyPreset(app, 0, 0); applyPreset(app, 1, 5);
                            app.mode = M_PLAY; showToast(app, "NEW PROJECT"); break;
-            default:       app.mode = M_FILE; app.fileAction = 2; refreshFileList(app); break;
+            default:       app.mode = M_SETUP; app.setupPage = 0; app.fileAction = 2; refreshFileList(app); break;
         }
         app.booted = true;
+        // First run: walk the player through making a beat rather than
+        // dropping them on a screen full of unlabelled keys.
+        if (!app.settings.tourDone && app.bootSel != BOOT_LOAD) tourStart(app);
     }
 }
 
@@ -415,7 +428,7 @@ static void handleKey(App& app, const KeyEvent& e) {
 
     // FILE screen turns the whole letter keyboard into a text field for the
     // project name. TAB, ENTER, BKSP, SPACE and the FN layer stay commands.
-    if (app.mode == M_FILE && app.fileAction == 0 && e.pressed && !m.fn) {
+    if (app.mode == M_SETUP && app.setupPage == 0 && app.fileAction == 0 && e.pressed && !m.fn) {
         char ch = nameCharFor(e.id, m.shift);
         if (ch) {
             int n = (int)strlen(app.proj.name);
@@ -426,7 +439,7 @@ static void handleKey(App& app, const KeyEvent& e) {
 
     // Musical keys (unless the command layer is active).
     int8_t semi = keyToSemitone(e.id);
-    if (semi >= 0 && !m.fn && !m.ctrl && app.mode != M_FILE) {
+    if (semi >= 0 && !m.fn && !m.ctrl && !(app.mode == M_SETUP && app.setupPage == 0)) {
         if (e.pressed) noteKeyDown(app, e.id, semi, m);
         else           noteKeyUp(app, e.id);
         return;
@@ -503,15 +516,29 @@ void appLoop() {
     // remove what I just recorded".
     if (a.booted && !a.menuOpen && !a.helpOpen && !a.keys.mods().fn &&
         a.keys.held(KID(0, 13)) && a.engine.seq().playing() &&
-        !(a.mode == M_FILE || a.mode == M_SYS)) {
+        a.mode != M_SETUP) {
         uint8_t track = a.engine.liveTrack();
         if (a.mode == M_DRUM)     track = (uint8_t)(kMelTracks + a.drumLane);
         else if (a.mode == M_SEQ) track = (uint8_t)(a.seqTrack % kMelTracks);
         a.engine.eraseStep(track);
     }
 
+    // The legend appears once a modifier has been held past the threshold, so
+    // the clock has to restart whenever the held set changes.
+    {
+        const Mods& m = a.keys.mods();
+        if (m.fn != a.lastMods.fn || m.shift != a.lastMods.shift ||
+            m.ctrl != a.lastMods.ctrl || m.alt != a.lastMods.alt) {
+            a.lastMods = m;
+            a.modsSince = now;
+        }
+    }
+
     for (int i = 0; i < a.keys.eventCount(); ++i) {
         const KeyEvent& e = a.keys.event(i);
+        // The tour watches for its key and then lets it through, so the step
+        // it asked for actually happens.
+        if (a.booted && a.tourOpen && tourKey(a, e.id, e.pressed)) continue;
         if (!a.booted) handleBootKey(a, e);
         else           handleKey(a, e);
     }

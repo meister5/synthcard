@@ -68,6 +68,18 @@ int8_t keyToSemitone(uint8_t id);
 int8_t keyToDrumLane(uint8_t id);
 // Command layer.
 Action mapAction(uint8_t id, const Mods& m);
+
+// Short human-readable name for an action, for the live legend and the
+// on-device manual. Every Act has one; unit_tests.cpp asserts it, so a new
+// action cannot be added without a label and quietly become invisible - which
+// is the failure mode the whole legend exists to prevent.
+const char* actionLabel(Act a);
+
+// True when this key is a modifier rather than something the legend should
+// list. The modifier being held is not itself a binding worth showing.
+inline bool isModifierKey(uint8_t id) {
+    return id == KID(2, 0) || id == KID(2, 1) || id == KID(3, 0) || id == KID(3, 2);
+}
 // Human readable key name for the on-device help screen.
 const char* keyName(uint8_t id);
 

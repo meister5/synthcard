@@ -69,13 +69,103 @@ static void withEveryHelpPage() {
     app.menuOpen = false;
 }
 
+// Every action must have a label. This is what makes the live legend
+// trustworthy: a binding cannot be added without a name, so it cannot become
+// one more invisible key.
+static void everyActionIsLabelled() {
+    for (int i = A_PLAY_STOP; i <= A_LOAD; ++i) {
+        const char* l = actionLabel((Act)i);
+        ++g_run;
+        if (!l || l[0] == 0) {
+            ++g_fail;
+            printf("FAIL action %d has no label\n", i);
+        } else {
+            hostCheckString(l);
+            CHECK(strlen(l) <= 16, "action %d label '%s' is too long for the legend", i, l);
+        }
+    }
+    CHECK(actionLabel(A_NONE)[0] == 0, "A_NONE should have no label");
+
+    // And every binding the input layer can produce must resolve to one.
+    static const bool flags[2] = {false, true};
+    for (bool fn : flags) for (bool sh : flags) for (bool ct : flags) for (bool al : flags) {
+        Mods m; m.fn = fn; m.shift = sh; m.ctrl = ct; m.alt = al;
+        for (uint8_t id = 0; id < kKeyCount; ++id) {
+            const Action a = mapAction(id, m);
+            if (a.act == A_NONE) continue;
+            ++g_run;
+            if (actionLabel(a.act)[0] == 0) {
+                ++g_fail;
+                printf("FAIL key %s binds action %d, which has no label\n", keyName(id), a.act);
+            }
+        }
+    }
+}
+
+// The legend draws for every modifier on every screen, under ASan.
+static void legendOnEveryScreen() {
+    for (int m = 0; m < M_COUNT; ++m) {
+        app.mode = (Mode)m;
+        for (int which = 0; which < 4; ++which) {
+            app.lastMods = Mods();
+            app.lastMods.fn    = (which == 0);
+            app.lastMods.shift = (which == 1);
+            app.lastMods.ctrl  = (which == 2);
+            app.lastMods.alt   = (which == 3);
+            app.modsSince = 0;
+            ++g_run;
+            uiDrawLegend(app);
+        }
+    }
+    app.lastMods = Mods();
+}
+
+// The tour runs end to end, and every wrong key leaves it where it was.
+static void walkTheTour() {
+    app.settings.tourDone = 0;
+    tourStart(app);
+    CHECK(app.tourOpen, "tour did not open");
+    int guard = 0;
+    while (app.tourOpen && guard++ < 200) {
+        const uint8_t before = app.tourStep;
+        ++g_run;
+        uiDrawTour(app);
+        // Every key on the board; only the one the step wants advances it.
+        for (uint8_t id = 0; id < kKeyCount && app.tourOpen; ++id) {
+            if (id == KID(0, 13)) continue;         // BKSP would skip out
+            tourKey(app, id, true);
+            tourKey(app, id, false);
+            if (app.tourStep != before) break;
+        }
+        CHECK(app.tourStep != before || !app.tourOpen, "tour step %d accepted no key", before);
+    }
+    CHECK(!app.tourOpen, "tour never finished");
+    CHECK(app.settings.tourDone == 1, "finishing the tour did not record it");
+
+    // And BKSP leaves from any step.
+    for (int step = 0; step < tourStepCount(); ++step) {
+        app.settings.tourDone = 0;
+        tourStart(app);
+        app.tourStep = (uint8_t)step;
+        tourKey(app, KID(0, 13), true);
+        CHECK(!app.tourOpen, "BKSP did not skip the tour from step %d", step);
+    }
+}
+
 int main() {
     printf("SynthCard UI tests\n");
+    // Pure table checks, safe before there is a canvas.
+    everyActionIsLabelled();
+
     app.proj.reset();
     app.engine.begin(&app.proj);
     app.engine.setUndoBuffer(&app.undoBuf);
     app.clipboard.clear();
     uiBegin();
+
+    // Anything that draws has to come after uiBegin().
+    legendOnEveryScreen();
+    walkTheTour();
 
     // 1. a freshly reset project
     drawEveryScreen("fresh");
@@ -193,8 +283,18 @@ int main() {
             Action act = mapAction(id, m);
             if (act.act == A_STEP)
                 CHECK(act.arg >= 0 && act.arg < 16, "key %s gave step arg %d", keyName(id), act.arg);
-            if (act.act == A_MODE_JUMP)
-                CHECK(act.arg >= 0 && act.arg < M_COUNT, "key %s gave mode %d", keyName(id), act.arg);
+            // The number row offers eight jumps; only the first M_COUNT name
+            // a mode, and the app must ignore the rest rather than wrap.
+            if (act.act == A_MODE_JUMP) {
+                CHECK(act.arg >= 0 && act.arg < 8, "key %s gave mode arg %d", keyName(id), act.arg);
+                if (act.arg >= M_COUNT) {
+                    // handleAction lives inside app.cpp; screenAction is the
+                    // reachable half, and neither may move the mode.
+                    const Mode before = app.mode;
+                    screenAction(app, act);
+                    CHECK(app.mode == before, "an out-of-range mode jump moved the mode");
+                }
+            }
             if (act.act == A_PATTERN_SEL)
                 CHECK(act.arg >= 0 && act.arg < kPatternCount, "key %s gave pattern %d",
                       keyName(id), act.arg);

@@ -6,7 +6,7 @@
 namespace synth {
 
 const char* const kModeNames[M_COUNT] =
-    {"PLAY", "DRUM", "SEQ", "SOUND", "FX", "SONG", "FILE", "SYS"};
+    {"PLAY", "DRUM", "SEQ", "SOUND", "FX", "SONG", "SETUP"};
 
 // Constructed inside uiBegin() rather than at static-init time: the sprite
 // reads settings off M5.Display, which is not brought up until M5.begin().
@@ -129,10 +129,20 @@ static void drawHintBar(App& a) {
     g.drawFastHLine(0, y, W, C_GRID);
     textAt(g, 3, y + 4, screenHint(a), C_DIM, &fonts::Font0);
 
-    char right[24];
-    if (a.mode == M_DRUM) snprintf(right, sizeof(right), "KIT %s", a.proj.kit.name);
-    else snprintf(right, sizeof(right), "OCT %d %s", a.proj.octave,
-                  a.proj.arpOn ? "ARP" : (a.proj.scale ? kScales[a.proj.scale % kScaleCount].name : ""));
+    // One fixed status strip. These used to be scattered across screens, so
+    // whether the arp was on depended on which screen you happened to be on.
+    char right[40];
+    if (a.mode == M_DRUM) {
+        snprintf(right, sizeof(right), "KIT %s", a.proj.kit.name);
+    } else {
+        char extra[24] = {0};
+        int k = 0;
+        if (a.proj.arpOn) k += snprintf(extra + k, sizeof(extra) - k, " ARP");
+        if (a.chordMode)  k += snprintf(extra + k, sizeof(extra) - k, " %s",
+                                        kChordNames[a.chordMode % CHORD_COUNT]);
+        snprintf(right, sizeof(right), "%s OCT%d%s",
+                 a.engine.liveTrack() == 0 ? "LEAD" : "BASS", a.proj.octave, extra);
+    }
     textAt(g, W - 3, y + 4, right, C_FAINT, &fonts::Font0, textdatum_t::top_right);
 }
 
@@ -193,7 +203,7 @@ static void drawMenu(App& a) {
 
 // Per-tab manual. The hint bar can only carry three shortcuts, so ` opens the
 // full page for whichever tab you are on; FN+, / FN+/ flips to the global keys.
-struct HelpPage { const char* title; const char* line[9]; };
+struct HelpPage { const char* title; const char* line[10]; };
 
 static const HelpPage kModeHelp[M_COUNT] = {
     {"PLAY", {
@@ -208,13 +218,13 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "hold BKSP       erase while playing"}},
     {"DRUM", {
         "1..8  Q..I      toggle steps 1-16",
-        "Z X C V B N M , .   the 9 drum pads",
-        "FN+; / FN+.     choose lane",
-        "FN+, / FN+/     page (patterns > 16)",
-        "O / P           lane parameter",
+        "Z X C V B N M , .   drum pads",
+        "FN+; / FN+.     choose lane (12 of them)",
+        "O / P           PUNCH TONE SPACE, then",
+        "                the 8 detail knobs",
         "[ / ]           change it (auditions)",
         "F / K           previous / next kit",
-        "FN+T            euclidean fill",
+        "hats and ride cut each other off",
         "'  mute lane    FN+BKSP clear lane"}},
     {"SEQ", {
         "1..8  Q..I      pick step 1-16",
@@ -234,8 +244,8 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "FN+; / FN+.     LEAD <-> BASS track",
         "F / K           previous / next preset",
         "FN+R            randomise, musically",
-        "DELAY and REVERB on the VOICE page",
-        "are this track's sends into the FX"}},
+        "O / P wraps past the end of a page,",
+        "so you never need the page keys."}},
     {"FX", {
         "O / P           pick a parameter",
         "[ / ]           change it (FN = x10)",
@@ -256,38 +266,29 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "FN+\\            song mode on / off",
         "",
         "Song mode plays the list top to bottom."}},
-    {"FILE", {
-        "FN+, / FN+/   NAME SAVE LOAD DELETE NEW",
-        "On NAME: type A-Z 0-9 - _",
-        "BKSP deletes, ENTER moves to SAVE",
-        "FN+; / FN+.     scan card / browse list",
-        "ENTER           run the chosen action",
-        "",
-        "Saves to SD:/synthcard/NAME.SCP",
-        "Nothing is written to the card until",
-        "you save."}},
-    {"SYS", {
-        "FN+; / FN+.     choose a row",
-        "[ / ]           change  (FN = x10)",
-        "",
-        "Volume, brightness, metronome,",
-        "swing, scale, root, chord mode,",
-        "arp rate / octaves / gate and",
-        "pattern length. The list scrolls.",
-        "",
-        "Right column is live: CPU RAM FPS"}},
+    {"SETUP", {
+        "FN+7            switch FILES / SYSTEM",
+        "FILES: FN+,//   NAME SAVE LOAD DEL NEW",
+        "  on NAME type A-Z 0-9 - _ ; ENTER",
+        "  saves to SD:/synthcard/NAME.SCP.",
+        "  Nothing is written until you save.",
+        "SYSTEM: FN+;/. row, [ / ] change.",
+        "  OUTPUT picks SPEAKER or LINE -",
+        "  SPEAKER trims what the speaker",
+        "  cannot reproduce. Right col is live."}},
 };
 
 static const HelpPage kGlobalHelp = {"GLOBAL KEYS", {
     "SPACE  play/stop    \\  record arm",
     "hold BKSP    erase under playhead",
     "CTRL+Z       undo  (again = redo)",
-    "TAB next tab       FN+1..8  jump",
+    "TAB next tab       FN+1..7  jump",
     "SHIFT+1..8     go to pattern 1-8",
     "SHIFT+[ / ]    prev / next pattern",
     "SHIFT+O / P    pattern length",
     "9/0 BPM  -/= octave  FN+SP tap",
-    "FN+`  menu         `  this help"}};
+    "FN+`  menu         `  this help",
+    "hold FN or SHIFT to see every key"}};
 
 int uiHelpPageCount() { return 2; }
 
@@ -302,7 +303,9 @@ static void drawHelp(App& a) {
     textAt(g, W - 4, 3, global ? "2/2" : "1/2", C_FAINT, &fonts::Font0, textdatum_t::top_right);
     g.drawFastHLine(0, 13, W, C_GRID);
 
-    for (int i = 0; i < 9; ++i)
+    // The array is wider than the page fits; draw what there is room for.
+    constexpr int kHelpLines = (int)(sizeof(hp.line) / sizeof(hp.line[0]));
+    for (int i = 0; i < kHelpLines && 17 + i * 11 < H - 4; ++i)
         if (hp.line[i] && hp.line[i][0])
             textAt(g, 6, 17 + i * 11, hp.line[i], C_TEXT, &fonts::Font0);
 
@@ -340,10 +343,14 @@ void uiDraw(App& a) {
     const uint32_t now = millis();
     g.fillSprite(C_BG);
 
+    if (a.tourOpen) { uiDrawTour(a); g.pushSprite(0, 0); return; }
     if (a.helpOpen) { drawHelp(a); g.pushSprite(0, 0); return; }
 
     drawTopBar(a);
-    screenDraw(a, 0, BODY_Y, W, BODY_H);
+    // Holding a modifier replaces the body with what that modifier does right
+    // now. The top bar stays, so the transport never disappears mid-take.
+    if (legendActive(a, now)) uiDrawLegend(a);
+    else                      screenDraw(a, 0, BODY_Y, W, BODY_H);
     drawHintBar(a);
     if (a.menuOpen) drawMenu(a);
     drawParamOverlay(a, now);

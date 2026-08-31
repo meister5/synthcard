@@ -147,6 +147,32 @@ Action mapAction(uint8_t id, const Mods& m) {
     return a;
 }
 
+// Ordered to match the Act enum exactly. The unit tests walk both and fail if
+// they fall out of step.
+static const char* const kActLabels[] = {
+    "",                 // A_NONE
+    "PLAY / STOP",      "RECORD",        "NEXT MODE",     "PREV MODE",
+    "GO TO MODE",       "MENU",
+    "BPM DOWN",         "BPM UP",        "OCTAVE DOWN",   "OCTAVE UP",
+    "TAP TEMPO",
+    "PREV PARAM",       "NEXT PARAM",    "VALUE DOWN",    "VALUE UP",
+    "CONFIRM",          "BACK",          "CLEAR TRACK",
+    "ARP ON/OFF",       "ARP MODE",      "PREV SOUND",    "NEXT SOUND",
+    "MUTE",
+    "UP",               "DOWN",          "LEFT",          "RIGHT",
+    "STEP",             "PATTERN",       "PATTERN +/-",
+    "SONG MODE",        "MANUAL",        "UNDO / REDO",
+    "SHORTER",          "LONGER",
+    "RANDOM DRUMS",     "RANDOM BASS",   "RANDOM LEAD",   "RANDOM SOUND",
+    "EUCLID",
+    "COPY",             "PASTE",         "CLEAR PATTERN", "SAVE",  "LOAD",
+};
+
+const char* actionLabel(Act a) {
+    const int n = (int)(sizeof(kActLabels) / sizeof(kActLabels[0]));
+    return ((int)a < n) ? kActLabels[a] : "";
+}
+
 const char* keyName(uint8_t id) {
     static const char* const kNames[56] = {
         "`","1","2","3","4","5","6","7","8","9","0","-","=","BKSP",
