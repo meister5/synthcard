@@ -229,7 +229,8 @@ static const HelpPage kModeHelp[M_COUNT] = {
         "hold BKSP       erase while playing"}},
     {"DRUM", {
         "1..8  Q..I      toggle steps 1-16",
-        "Z X C V B N M , .   drum pads",
+        "Z X C V B N M , . /  pads 1-10",
+        "S D                  pads 11-12",
         "FN+; / FN+.     choose lane (12 of them)",
         "O / P           PUNCH TONE SPACE, then",
         "                the 8 detail knobs",

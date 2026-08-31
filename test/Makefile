@@ -35,7 +35,7 @@ test: unit_tests
 	./unit_tests
 
 clean:
-	rm -f unit_tests ui_tests render bench
+	rm -f unit_tests ui_tests render bench gen_controls
 	rm -rf out
 
 .PHONY: test clean
@@ -95,3 +95,18 @@ bench-run: bench
 	./bench
 
 .PHONY: bench-run
+
+# --- generated CONTROLS.md ---------------------------------------------------
+# The key tables are produced by walking mapAction(), so the manual cannot
+# describe a binding that does not exist or miss one that does.
+CONTROLS_SOURCES := gen_controls.cpp $(SRC_DIR)/input/keys.cpp $(CORE)
+
+gen_controls: $(CONTROLS_SOURCES)
+	$(CXX) $(CXXFLAGS) -Wno-narrowing -Istub -o $@ $(CONTROLS_SOURCES) host_stubs.cpp \
+	    $(SRC_DIR)/ui/ui.cpp $(SRC_DIR)/ui/screens.cpp $(SRC_DIR)/ui/legend.cpp \
+	    $(SRC_DIR)/ui/tour.cpp $(SRC_DIR)/app.cpp $(SRC_DIR)/audio/engine.cpp
+
+controls-md: gen_controls
+	./gen_controls
+
+.PHONY: controls-md

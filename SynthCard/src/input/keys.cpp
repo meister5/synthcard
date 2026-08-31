@@ -75,7 +75,11 @@ int8_t keyToSemitone(uint8_t id) {
 
 int8_t keyToDrumLane(uint8_t id) {
     uint8_t r = id / 14, c = id % 14;
-    if (r == 3 && c >= 3 && c <= 11) return (int8_t)(c - 3);   // z..'.' -> 9 lanes
+    // Ten pads along the white-key row, then the two black keys above its
+    // left end for the last pair - the kit has twelve lanes and the bottom
+    // row only has ten keys.
+    if (r == 3 && c >= 3 && c <= 12) return (int8_t)(c - 3);        // Z .. /   lanes 0-9
+    if (r == 2 && (c == 3 || c == 4)) return (int8_t)(10 + c - 3);  // S D      lanes 10-11
     return -1;
 }
 
@@ -95,7 +99,10 @@ Action mapAction(uint8_t id, const Mods& m) {
 
     // Row 0 digits: steps 1-8, then BPM / octave.
     if (r == 0 && c >= 1 && c <= 8) {
-        if (m.fn)    { a.act = A_MODE_JUMP;   a.arg = (int8_t)(c - 1); return a; }
+        // Only the keys that name a real mode bind the jump; binding all eight
+        // would put a mode in the legend and the manual that does not exist.
+        if (m.fn && c <= kModeJumpCount) { a.act = A_MODE_JUMP; a.arg = (int8_t)(c - 1); return a; }
+        if (m.fn)    { return a; }
         if (m.shift) { a.act = A_PATTERN_SEL; a.arg = (int8_t)(c - 1); return a; }
         a.act = A_STEP; a.arg = (int8_t)(c - 1); return a;
     }

@@ -15,6 +15,9 @@ enum Mode : uint8_t {
     M_PLAY = 0, M_DRUM, M_SEQ, M_SOUND, M_FX, M_SONG, M_SETUP, M_COUNT
 };
 extern const char* const kModeNames[M_COUNT];
+// The input layer binds this many mode-jump keys; keeping the two in step is
+// what stops FN+8 advertising an eighth mode.
+static_assert(kModeJumpCount == M_COUNT, "kModeJumpCount must match M_COUNT");
 
 enum BootChoice : uint8_t { BOOT_JAM = 0, BOOT_NEW, BOOT_LOAD, BOOT_COUNT };
 struct App {

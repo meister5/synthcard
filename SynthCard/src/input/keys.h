@@ -10,6 +10,12 @@ namespace synth {
 
 // Physical key id = row * 14 + col, matching the M5Cardputer key matrix.
 constexpr uint8_t kKeyCount = 56;
+
+// How many of the number-row keys jump to a mode. The input layer is below the
+// application and does not know about Mode, so the count lives here and app.h
+// static_asserts that it still matches M_COUNT - which is what stops the
+// legend and the generated manual advertising a mode that does not exist.
+constexpr uint8_t kModeJumpCount = 7;
 constexpr uint8_t KID(uint8_t row, uint8_t col) { return (uint8_t)(row * 14 + col); }
 
 enum Act : uint8_t {

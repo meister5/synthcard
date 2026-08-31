@@ -20,7 +20,13 @@ uint32_t esp_random() { static uint32_t s = 12345; s ^= s << 13; s ^= s >> 17; s
 
 // Walking the string is the whole point: a bad const char* faults here under
 // ASan instead of silently rendering garbage (or rebooting) on the device.
+// The backtrace is only available in the sanitised build; the same file also
+// links into the plain tools.
+#if defined(__SANITIZE_ADDRESS__)
 extern "C" void __sanitizer_print_stack_trace(void);
+#else
+static void __sanitizer_print_stack_trace(void) {}
+#endif
 void hostCheckString(const char* s) {
     if (!s) {
         fprintf(stderr, "FATAL: null string passed to the display\n");
